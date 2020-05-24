@@ -8,19 +8,22 @@ fn main() -> anyhow::Result<()> {
         current_dir
     );
 
-
     let mut queue : std::collections::VecDeque<std::path::PathBuf> = Default::default();
     queue.push_front(current_dir.clone());
 
     while !queue.is_empty() {
         let entry = queue.pop_back().unwrap();
+        assert!(std::fs::metadata(&entry)?.is_dir());
 
         println!("{:?}", entry);
 
-        let meta = std::fs::metadata(&entry)?;
-        if meta.is_dir() {
-            for child in fs::read_dir(entry)? {
-                let child_path = child?.path();
+        for child in fs::read_dir(entry)? {
+            let child_path = child?.path();
+            let child_meta = std::fs::metadata(&child_path)?;
+
+            if child_meta.is_file() {
+                println!("{:?}", child_path);
+            } else {
                 queue.push_front(child_path);
             }
         }
