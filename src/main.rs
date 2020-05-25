@@ -1,26 +1,58 @@
-use std::{env, fs};
 use anyhow::anyhow;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use std::{env, fs};
+use std::sync::Arc;
+/*
+struct IgnoreIter<'a> {
+    _gitignore : std::rc::Rc<Gitignore>,
+    _returned : bool
+}
+
+impl<'a> Iterator for IgnoreIter<'a> {
+    type Item = &'a Gitignore;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.returned {
+            None
+        } else {
+            *self._gitignore
+        }
+    }
+}
+*/
+
+struct IgnoresList {
+    _gitignore : std::rc::Rc<Gitignore>,
+    _next : Option<Arc<IgnoresList>>
+}
 
 fn main() -> anyhow::Result<()> {
     let current_dir = env::current_dir()?;
     println!("Starting Dir: [{:?}]", current_dir);
     let current_dir : std::path::PathBuf = "c:/source_control".into();
 
-    let mut queue : std::collections::VecDeque<std::path::PathBuf> = Default::default();
-    queue.push_back(current_dir.clone());
+    let mut gitignores : Vec<Gitignore> = Default::default();
+    type IgnoreIter = Box<dyn Iterator<Item=Arc<Gitignore>>>;
 
-    //let mut dirs : Vec<std::path::PathBuf> = Default::default();
-    let mut gitignores : Vec<ignore::gitignore::Gitignore> = Default::default();
+    //type IgnoreIter = dyn Iterator<Item=Arc<Gitignore>>;
+    //let mut ignores_iter : IgnoreIter = std::iter::empty::<Arc<Gitignore>>();
+    let mut ignores_iter = std::iter::empty::<Arc<Gitignore>>();
 
-    let (global_ignore, err) = ignore::gitignore::GitignoreBuilder::new(current_dir).build_global();
+    let (global_ignore, err) = GitignoreBuilder::new(current_dir.clone()).build_global();
     if err.is_none() && global_ignore.num_ignores() > 0 {
-        gitignores.push(global_ignore);
+        let arc_global_ignore = Arc::new(global_ignore);
+        let global_ignore_iter = std::iter::from_fn(move || Some(arc_global_ignore.clone()));
+        let ignores_iter = ignores_iter.chain(global_ignore_iter);
+        //gitignores.push(global_ignore);
     }
 
     let mut ignored : Vec<std::path::PathBuf> = Default::default();
 
+    let mut queue : std::collections::VecDeque<(_, std::path::PathBuf)> = Default::default();
+    queue.push_back((gitignores.iter(), current_dir));
+
     while !queue.is_empty() {
-        let entry = queue.pop_front().unwrap();
+        let (ignore_iter, entry) = queue.pop_front().unwrap();
         assert!(std::fs::metadata(&entry)?.is_dir());
 
         //println!("Dir: {:?}", entry);
@@ -41,7 +73,7 @@ fn main() -> anyhow::Result<()> {
                     let parent_path = child_path.parent().ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
                     let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
                     ignore_builder.add(child_path);
-                    gitignores.push(ignore_builder.build()?);
+                    //gitignores.push(ignore_builder.build()?);
                 } else {
                     let is_ignored = gitignores.iter()
                         .map(|i| i.matched(&child_path, true))
@@ -74,7 +106,7 @@ fn main() -> anyhow::Result<()> {
             if is_ignored {
                 ignored.push(dir);
             } else {
-                queue.push_back(dir);
+                queue.push_back((ignore_iter.clone(), dir));
             }
         }
     }
