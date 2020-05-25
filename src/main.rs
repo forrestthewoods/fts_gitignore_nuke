@@ -4,18 +4,26 @@ use anyhow::anyhow;
 fn main() -> anyhow::Result<()> {
     let current_dir = env::current_dir()?;
     println!("Starting Dir: [{:?}]", current_dir);
+    let current_dir : std::path::PathBuf = "c:/source_control".into();
 
     let mut queue : std::collections::VecDeque<std::path::PathBuf> = Default::default();
     queue.push_back(current_dir.clone());
 
     //let mut dirs : Vec<std::path::PathBuf> = Default::default();
-    let mut ignores : Vec<ignore::gitignore::Gitignore> = Default::default();
+    let mut gitignores : Vec<ignore::gitignore::Gitignore> = Default::default();
+
+    let (global_ignore, err) = ignore::gitignore::GitignoreBuilder::new(current_dir).build_global();
+    if err.is_none() && global_ignore.num_ignores() > 0 {
+        gitignores.push(global_ignore);
+    }
+
+    let mut ignored : Vec<std::path::PathBuf> = Default::default();
 
     while !queue.is_empty() {
         let entry = queue.pop_front().unwrap();
         assert!(std::fs::metadata(&entry)?.is_dir());
 
-        println!("Dir: {:?}", entry);
+        //println!("Dir: {:?}", entry);
 
         let mut dirs : Vec<std::path::PathBuf> = Default::default();
 
@@ -24,16 +32,31 @@ fn main() -> anyhow::Result<()> {
             let child_meta = std::fs::metadata(&child_path)?;
 
             if child_meta.is_file() {
-                println!("File: {:?}", child_path);
+                //println!("File: {:?}", child_path);
+
+                
 
                 if child_path.file_name().unwrap() == ".gitignore" {
-                    println!("!!! IGNORE: {:?}", child_path);
+                    //println!("!!! IGNORE: {:?}", child_path);
                     let parent_path = child_path.parent().ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
                     let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
                     ignore_builder.add(child_path);
-                    ignores.push(ignore_builder.build()?);
+                    gitignores.push(ignore_builder.build()?);
+                } else {
+                    let is_ignored = gitignores.iter()
+                        .map(|i| i.matched(&child_path, true))
+                        .any(|m| {
+                            if m.is_ignore() {
+                                println!("{:?}", m.inner().unwrap());
+                                true
+                            } else {
+                                false
+                            }
+                        });
 
-                    // TODO: Make gitignore builder
+                    if is_ignored {
+                        ignored.push(child_path);
+                    }
                 }
             } else {
                 dirs.push(child_path);
@@ -42,17 +65,23 @@ fn main() -> anyhow::Result<()> {
 
         for dir in dirs.into_iter() {
 
-            let ignored = ignores.iter()
+            let is_ignored = gitignores.iter()
                 .map(|i| i.matched(&dir, true))
                 .any(|m| m.is_ignore());
 
-            println!("Ignored?: [{}] [{:?}]", ignored, dir);
+            //println!("Ignored?: [{}] [{:?}]", is_ignored, dir);
 
-            
-            if !ignored {
-                //queue.push_back(dir);
+            if is_ignored {
+                ignored.push(dir);
+            } else {
+                queue.push_back(dir);
             }
         }
+    }
+
+    println!("Ignored");
+    for path in ignored.into_iter() {
+        println!("  {:?}", path);
     }
 
         /*
