@@ -1,6 +1,7 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use itertools::Itertools;
+use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
 
 mod immutable_stack;
@@ -58,9 +59,9 @@ fn pretty_bytes(orig_amount: u64) -> String {
 }
 
 fn main() -> anyhow::Result<()> {
-    let current_dir = env::current_dir()?;
+    let current_dir = env::current_dir().with_context(|| format!("Failed to evaluate env::current_dir"))?;
     println!("Starting Dir: [{:?}]", current_dir);
-    let current_dir : std::path::PathBuf = "c:/source_control".into();
+    let current_dir : std::path::PathBuf = "c:/temp".into();
 
     // Root ignore (empty)
     let ignore_stack = ImmutableStack::new();
@@ -83,7 +84,7 @@ fn main() -> anyhow::Result<()> {
     // Process all paths
     while !queue.is_empty() {
         let (mut ignore_tip, entry) = queue.pop_front().unwrap();
-        assert!(std::fs::metadata(&entry)?.is_dir());
+        assert!(std::fs::metadata(&entry).with_context(|| format!("Could not access metadata: [{:?}]", &entry))?.is_dir());
 
         // Dirs must be deferred so they can consider potential ignore files
         let mut dirs : Vec<std::path::PathBuf> = Default::default();
@@ -91,14 +92,19 @@ fn main() -> anyhow::Result<()> {
         // Process each child in directory
         for child in fs::read_dir(entry)? {
             let child_path = child?.path();
-            let child_meta = std::fs::metadata(&child_path)?;
+            let child_meta = match std::fs::metadata(&child_path) {
+                Ok(inner) => inner,
+                Err(_) => continue
+            };
 
             // Child is file
             if child_meta.is_file() {
                 // Child is ignorefile. Push it onto ignore stack
                 if child_path.file_name().unwrap() == ".gitignore" {
                     // Parse new .gitignore
-                    let parent_path = child_path.parent().ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
+                    let parent_path = child_path.parent()
+                        .ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
+                    
                     let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
                     ignore_builder.add(child_path);
                     let new_ignore = ignore_builder.build()?;
@@ -137,15 +143,16 @@ fn main() -> anyhow::Result<()> {
 
     // Print all ignored content
     println!("Ignored:");
-    //for path in ignored_paths
-    //    .into_iter() 
+    let mut total_bytes = 0;
     ignored_paths.into_iter()
         .map(|dir| (dir_size(dir.clone()), dir))
         .filter_map(|(bytes, dir)| if let Ok(bytes) = bytes { Some((bytes, dir)) } else { None })
         .sorted_by_key(|kvp| kvp.0)
         .for_each(|(bytes, path)| {
+            total_bytes += bytes;
             println!("  {:10} {:?}", pretty_bytes(bytes), path);
         });
+    println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
 
     Ok(())
 }
