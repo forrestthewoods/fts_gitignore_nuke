@@ -21,61 +21,105 @@ impl<'a> Iterator for IgnoreIter<'a> {
 }
 */
 
-struct IgnoresList {
-    _gitignore : std::rc::Rc<Gitignore>,
-    _next : Option<Arc<IgnoresList>>
+/*
+struct IgnoreChainNode {
+    gitignore : Arc<Gitignore>,
+    prev : Option<Arc<IgnoreChainNode>>
+}
+
+impl IgnoreChainNode {
+    fn new(gitignore: Arc<Gitignore>) -> Self {
+        Self { 
+            gitignore, 
+            prev: None 
+        }
+    }
+}
+*/
+
+
+#[derive(Clone)]
+struct IgnoreChainIter {
+    inner: Option<(Arc<Gitignore>, Arc<IgnoreChainIter>)>
+}
+
+impl IgnoreChainIter {
+    fn empty() -> Arc<Self> {
+        Arc::new(
+            Self { 
+                inner : None
+            }
+        )
+    }
+
+    fn chain(ignore: Arc<Gitignore>, prev: Arc<IgnoreChainIter>) -> Arc<IgnoreChainIter> {
+        Arc::new(
+            Self {
+                inner: Some((ignore, prev))
+            }
+        )
+    }
+}
+
+impl Iterator for IgnoreChainIter {
+    type Item = Arc<Gitignore>;
+
+    fn next(&mut self) -> Option<Arc<Gitignore>> {
+        match self.inner.clone() {
+            Some((ignore, prev)) => {
+                self.inner = prev.inner.clone();
+                Some(ignore.clone())
+            },
+            None => None,
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
     let current_dir = env::current_dir()?;
     println!("Starting Dir: [{:?}]", current_dir);
     let current_dir : std::path::PathBuf = "c:/source_control".into();
+    
+    // Root ignore (empty)
+    let mut ignore_chain = IgnoreChainIter::empty();
 
-    let mut gitignores : Vec<Gitignore> = Default::default();
-    type IgnoreIter = Box<dyn Iterator<Item=Arc<Gitignore>>>;
-
-    //type IgnoreIter = dyn Iterator<Item=Arc<Gitignore>>;
-    //let mut ignores_iter : IgnoreIter = std::iter::empty::<Arc<Gitignore>>();
-    let mut ignores_iter = std::iter::empty::<Arc<Gitignore>>();
-
+    // Add global ignore (if exists)
     let (global_ignore, err) = GitignoreBuilder::new(current_dir.clone()).build_global();
     if err.is_none() && global_ignore.num_ignores() > 0 {
         let arc_global_ignore = Arc::new(global_ignore);
-        let global_ignore_iter = std::iter::from_fn(move || Some(arc_global_ignore.clone()));
-        let ignores_iter = ignores_iter.chain(global_ignore_iter);
-        //gitignores.push(global_ignore);
+        ignore_chain = IgnoreChainIter::chain(arc_global_ignore, ignore_chain);
     }
 
+    // List of all ignored paths
     let mut ignored : Vec<std::path::PathBuf> = Default::default();
 
-    let mut queue : std::collections::VecDeque<(_, std::path::PathBuf)> = Default::default();
-    queue.push_back((gitignores.iter(), current_dir));
+    // Queue of paths to consider
+    let mut queue : std::collections::VecDeque<(Arc<IgnoreChainIter>, std::path::PathBuf)> = Default::default();
+    queue.push_back((ignore_chain, current_dir));
 
+    // Process all paths
     while !queue.is_empty() {
-        let (ignore_iter, entry) = queue.pop_front().unwrap();
+        let (ignore_chain, entry) = queue.pop_front().unwrap();
         assert!(std::fs::metadata(&entry)?.is_dir());
 
         //println!("Dir: {:?}", entry);
 
         let mut dirs : Vec<std::path::PathBuf> = Default::default();
+        let mut new_ignore_chain = ignore_chain.clone();
 
         for child in fs::read_dir(entry)? {
             let child_path = child?.path();
             let child_meta = std::fs::metadata(&child_path)?;
 
             if child_meta.is_file() {
-                //println!("File: {:?}", child_path);
-
-                
-
                 if child_path.file_name().unwrap() == ".gitignore" {
-                    //println!("!!! IGNORE: {:?}", child_path);
                     let parent_path = child_path.parent().ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
                     let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
                     ignore_builder.add(child_path);
-                    //gitignores.push(ignore_builder.build()?);
+                    let new_ignore = Arc::new(ignore_builder.build()?);
+                    new_ignore_chain = IgnoreChainIter::chain(new_ignore, ignore_chain.clone());
                 } else {
-                    let is_ignored = gitignores.iter()
+                    let is_ignored = ignore_chain.clone()
                         .map(|i| i.matched(&child_path, true))
                         .any(|m| {
                             if m.is_ignore() {
@@ -97,16 +141,15 @@ fn main() -> anyhow::Result<()> {
 
         for dir in dirs.into_iter() {
 
-            let is_ignored = gitignores.iter()
+            let is_ignored = new_ignore_chain.clone()
                 .map(|i| i.matched(&dir, true))
                 .any(|m| m.is_ignore());
 
-            //println!("Ignored?: [{}] [{:?}]", is_ignored, dir);
 
             if is_ignored {
                 ignored.push(dir);
             } else {
-                queue.push_back((ignore_iter.clone(), dir));
+                queue.push_back((new_ignore_chain.clone(), dir));
             }
         }
     }
