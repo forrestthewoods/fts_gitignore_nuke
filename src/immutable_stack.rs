@@ -22,7 +22,7 @@ impl<T> ImmutableStack<T> {
             node: Some(
                 Arc::new(
                     Node {
-                        elem: elem,
+                        elem,
                         next: self.node.clone(),
                     }
                 )

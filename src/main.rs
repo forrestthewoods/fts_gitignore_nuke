@@ -53,7 +53,7 @@ fn main() -> anyhow::Result<()> {
     // Add global ignore (if exists)
     let (global_ignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
     if err.is_none() && global_ignore.num_ignores() > 0 {
-        ignore_tip = ignore_stack.push(global_ignore).clone();
+        ignore_tip = ignore_stack.push(global_ignore);
     }
 
     // List of all ignored paths
@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
                 if child_path.file_name().unwrap() == ".gitignore" {
                     // Parse new .gitignore
                     let parent_path = child_path.parent()
-                        .ok_or(anyhow!("Failed to get parent for [{:?}]", child_path))?;
+                        .ok_or_else(|| anyhow!("Failed to get parent for [{:?}]", child_path))?;
                     
                     let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
                     ignore_builder.add(child_path);
