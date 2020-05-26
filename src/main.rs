@@ -4,6 +4,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
+use std::time::Instant;
 
 mod immutable_stack;
 use immutable_stack::ImmutableStack;
@@ -63,8 +64,8 @@ fn main() -> anyhow::Result<()> {
     let mut queue : std::collections::VecDeque<(ImmutableStack<Gitignore>, std::path::PathBuf)> = Default::default();
     queue.push_back((ignore_tip, starting_dir));
 
-
     // Process all paths
+    let start = Instant::now();
     while !queue.is_empty() {
         let (mut ignore_tip, entry) = queue.pop_front().unwrap();
 
@@ -143,6 +144,7 @@ fn main() -> anyhow::Result<()> {
             final_ignore_paths.push(path);
         });
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
+    println!("Search Time: {:?}", start.elapsed());
 
     if final_ignore_paths.is_empty() {
         println!("No ignore paths to delete.");
