@@ -8,61 +8,6 @@ use std::{env, fs};
 mod immutable_stack;
 use immutable_stack::ImmutableStack;
 
-// Recursively calculate size of all files within a single directory
-fn dir_size(path: std::path::PathBuf) -> anyhow::Result<u64> {
-    // Input path may be file
-    let meta = fs::metadata(&path)?;
-    if meta.is_file() {
-        return Ok(meta.len());
-    }
-    
-    // Recursively compute pathsize
-    let mut result = 0;
-
-    let mut dirs = vec![path];
-    while !dirs.is_empty() {
-        let dir = dirs.pop().unwrap();
-
-        // Process each element in dir
-        for child in fs::read_dir(dir)? {
-            let child_path = child?.path();
-            let meta = fs::metadata(&child_path)?;
-            if meta.is_file() {
-                // Add file sizes to result
-                result += meta.len();
-            } else {
-                // Add directories to queue for processing
-                dirs.push(child_path);
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-// Print u64 bytes value as a suffixed string
-fn pretty_bytes(orig_amount: u64) -> String {
-    let mut amount = orig_amount;
-    let mut order = 0;
-    while amount > 1000 {
-        amount /= 1000;
-        order += 1;
-    }
-
-    match order {
-        0 => format!("{} b", amount),
-        1 => format!("{} Kb", amount),
-        2 => format!("{} Mb", amount),
-        3 => format!("{} Gb", amount),
-        4 => format!("{} Tb", amount),
-        5 => format!("{} Pb", amount),
-        6 => format!("{} Exa", amount),
-        7 => format!("{} Zetta", amount),
-        8 => format!("{} Yotta", amount),
-        _ => format!("{}", orig_amount)
-    }
-}
-
 fn main() -> anyhow::Result<()> {
 
     // Parse cmdline args
@@ -74,8 +19,13 @@ fn main() -> anyhow::Result<()> {
             .short("d")
             .long("directory")
             .value_name("DIRECTORY")
-            .help("Root directory to start search")
-        )
+            .help("Root directory to start search"))
+        .arg(Arg::with_name("min_file_size")
+            .short("mfs")
+            .long("min_file_size")
+            .value_name("MIN_FILE_SIZE")
+            .help("Minimum size, in bytes, to nuke")
+            .default_value("0"))
         .get_matches();
     
     // Determine starting dir
@@ -90,6 +40,8 @@ fn main() -> anyhow::Result<()> {
     } else if !starting_dir.is_dir() {
         return Err(anyhow!("[{:?}] is not a directory", starting_dir));
     }
+
+    let min_filesize_in_bytes : u64 = matches.value_of("min_file_size").unwrap().parse().unwrap();
 
     // Start .gitignore stack with an empty root
     let ignore_stack = ImmutableStack::new();
@@ -179,6 +131,7 @@ fn main() -> anyhow::Result<()> {
     ignored_paths.into_iter()
         .map(|dir| (dir_size(dir.clone()), dir))
         .filter_map(|(bytes, dir)| if let Ok(bytes) = bytes { Some((bytes, dir)) } else { None })
+        .filter(|(bytes, _)| *bytes >= min_filesize_in_bytes)
         .sorted_by_key(|kvp| kvp.0)
         .for_each(|(bytes, path)| {
             total_bytes += bytes;
@@ -188,17 +141,83 @@ fn main() -> anyhow::Result<()> {
 
     // Verify nuke
     const NUKE_STRING : &str = "NUKE";
-    println!("\nDo you wish to delete? This action can not be undone!\nType {} to proceed:", NUKE_STRING);
-    
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let trimmed_input = input.trim();
-    if trimmed_input == NUKE_STRING {
-        println!("\n☢️☢️☢️ Nuclear launch detected ☢️☢️☢️");
-        println!("Nuclear deletion complete.");
-    } else {
-        println!("Nuclear launch aborted. Input was [{}] but must exactly match [{}] to irrevocably nuke.", trimmed_input, NUKE_STRING);
+    const QUIT_STRING : &str = "QUIT";
+
+    loop {
+        println!("\n⚠️⚠️⚠️ Do you wish to delete? This action can not be undone! ⚠️⚠️⚠️");
+        println!("Type {} to proceed, {} to quit:", NUKE_STRING, QUIT_STRING);
+        let mut input = String::new();
+
+        std::io::stdin().read_line(&mut input)?;
+        let trimmed_input = input.trim();
+        if trimmed_input == NUKE_STRING {
+            println!("\n☢️☢️☢️ nuclear launch detected ☢️☢️☢️");
+            println!("☠️☠️☠️ nuclear deletion complete ☠️☠️☠️");
+            break;
+        } 
+        else if trimmed_input.eq_ignore_ascii_case(QUIT_STRING) {
+            println!("😇😇😇 Nuclear launch aborted. Thank you and have a nice day. 😇😇😇");
+            break;
+        }
+        else {
+            println!("Invalid input. Input was [{}] but must exactly match [{}] to irrevocably nuke. Please try again.", trimmed_input, NUKE_STRING);
+        }
     }
 
     Ok(())
+}
+
+// Recursively calculate size of all files within a single directory
+fn dir_size(path: std::path::PathBuf) -> anyhow::Result<u64> {
+    // Input path may be file
+    let meta = fs::metadata(&path)?;
+    if meta.is_file() {
+        return Ok(meta.len());
+    }
+    
+    // Recursively compute pathsize
+    let mut result = 0;
+
+    let mut dirs = vec![path];
+    while !dirs.is_empty() {
+        let dir = dirs.pop().unwrap();
+
+        // Process each element in dir
+        for child in fs::read_dir(dir)? {
+            let child_path = child?.path();
+            let meta = fs::metadata(&child_path)?;
+            if meta.is_file() {
+                // Add file sizes to result
+                result += meta.len();
+            } else {
+                // Add directories to queue for processing
+                dirs.push(child_path);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+// Print u64 bytes value as a suffixed string
+fn pretty_bytes(orig_amount: u64) -> String {
+    let mut amount = orig_amount;
+    let mut order = 0;
+    while amount > 1000 {
+        amount /= 1000;
+        order += 1;
+    }
+
+    match order {
+        0 => format!("{} b", amount),
+        1 => format!("{} Kb", amount),
+        2 => format!("{} Mb", amount),
+        3 => format!("{} Gb", amount),
+        4 => format!("{} Tb", amount),
+        5 => format!("{} Pb", amount),
+        6 => format!("{} Exa", amount),
+        7 => format!("{} Zetta", amount),
+        8 => format!("{} Yotta", amount),
+        _ => format!("{}", orig_amount)
+    }
 }
