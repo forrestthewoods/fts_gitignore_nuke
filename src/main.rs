@@ -40,6 +40,9 @@ fn main() -> anyhow::Result<()> {
     } else if !starting_dir.is_dir() {
         return Err(anyhow!("[{:?}] is not a directory", starting_dir));
     }
+    let starting_dir = std::fs::canonicalize(starting_dir)?;
+
+    println!("🔍 scanning for targets from [{:?}]", starting_dir);
 
     let min_filesize_in_bytes : u64 = matches.value_of("min_file_size").unwrap().parse().unwrap();
 
