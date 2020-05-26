@@ -128,6 +128,7 @@ fn main() -> anyhow::Result<()> {
     // Print all ignored content
     println!("Ignored:");
     let mut total_bytes = 0;
+    let mut final_ignore_paths : Vec<_> = Default::default();
     ignored_paths.into_iter()
         .map(|dir| (dir_size(dir.clone()), dir))
         .filter_map(|(bytes, dir)| if let Ok(bytes) = bytes { Some((bytes, dir)) } else { None })
@@ -136,13 +137,45 @@ fn main() -> anyhow::Result<()> {
         .for_each(|(bytes, path)| {
             total_bytes += bytes;
             println!("  {:10} {:?}", pretty_bytes(bytes), path);
+            final_ignore_paths.push(path);
         });
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
+
+    if final_ignore_paths.is_empty() {
+        println!("No ignore paths to delete.");
+        return Ok(());
+    }
 
     // Verify nuke
     const NUKE_STRING : &str = "NUKE";
     const QUIT_STRING : &str = "QUIT";
 
+    // Helper to remove either a file or a directory
+    let remove_path = |path: &std::path::Path| {
+        let meta = match fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) => {
+                println!("Unable to nuke [{:?}]. Failed to query metadata. Error: [{:?}]", path, e);
+                return;
+            }
+        };
+
+        if meta.is_file() {
+            // Delete file
+            match std::fs::remove_file(&path) {
+                Ok(_) => (),
+                Err(e) => println!("Unable to nuke file [{:?}]. Error: [{:?}]", path, e)
+            };
+        } else {
+            // Delete directory
+            match std::fs::remove_dir_all(&path) {
+                Ok(_) => (),
+                Err(e) => println!("Unable to nuke directory [{:?}]. Directory may be partially deleted. Error: [{:?}]", path, e)
+            };
+        }
+    };
+
+    // Loop to get confirmation to nuke data or quit
     loop {
         println!("\n⚠️⚠️⚠️ Do you wish to delete? This action can not be undone! ⚠️⚠️⚠️");
         println!("Type {} to proceed, {} to quit:", NUKE_STRING, QUIT_STRING);
@@ -152,6 +185,12 @@ fn main() -> anyhow::Result<()> {
         let trimmed_input = input.trim();
         if trimmed_input == NUKE_STRING {
             println!("\n☢️☢️☢️ nuclear launch detected ☢️☢️☢️");
+
+            // Delete all the things
+            for path in final_ignore_paths {
+                remove_path(&path);
+            }
+
             println!("☠️☠️☠️ nuclear deletion complete ☠️☠️☠️");
             break;
         } 
