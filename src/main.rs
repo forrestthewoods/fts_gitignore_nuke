@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::{Arg, App};
 use crossbeam_deque::{Injector, Stealer, Worker};
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::gitignore::GitignoreBuilder;
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
@@ -13,6 +13,8 @@ mod immutable_stack;
 use immutable_stack::ImmutableStack;
 
 fn main() -> anyhow::Result<()> {
+    let start = Instant::now();
+    let cpus_str = num_cpus::get_physical().to_string();
 
     // Parse cmdline args
     let matches = App::new("☢️ fts_gitignore_nuke ☢️")
@@ -30,7 +32,22 @@ fn main() -> anyhow::Result<()> {
             .value_name("MIN_FILE_SIZE")
             .help("Minimum size, in bytes, to nuke")
             .default_value("0"))
+        .arg(Arg::with_name("num_threads")
+            .short("t")
+            .long("num_threads")
+            .value_name("NUM_THREADS")
+            .help("Number of threads to use")
+            .default_value(&cpus_str))
+        .arg(Arg::with_name("benchmark")
+            .short("b")
+            .long("bench")
+            .value_name("BENCHMARK")
+            .help("Run benchmark. Auto-quit after walking directory")
+            .required(false)
+            .takes_value(false))
         .get_matches();
+
+    let benchmark_mode = matches.is_present("benchmark");
     
     // Determine starting dir
     let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
@@ -63,90 +80,131 @@ fn main() -> anyhow::Result<()> {
     // TODO: Recursively walk parents searching for gitignores above us
 
     // List of all ignored paths
-    let mut ignored_paths : Vec<std::path::PathBuf> = Default::default();
+    //let mut ignored_paths : Vec<std::path::PathBuf> = Default::default();
 
     // Queue of paths to consider
-    let mut queue : std::collections::VecDeque<(ImmutableStack<Gitignore>, std::path::PathBuf)> = Default::default();
-    queue.push_back((ignore_tip, starting_dir));
+    //let mut queue : std::collections::VecDeque<(ImmutableStack<Gitignore>, std::path::PathBuf)> = Default::default();
+    //queue.push_back((ignore_tip, starting_dir));
 
 
-    // ---------------------------------------------------
-
-
-
-    let num_threads = num_cpus::get();
-
-
-
-    let workers : Vec<_> = (0..num_threads).map(|_| Worker::<u8>::new_lifo()).collect();
-    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
-    
+    // Create crossbeam structs for work-stealing job queue
+    let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
     let injector = Injector::new();
-    injector.push(5);
+    let workers : Vec<_> = (0..num_threads).map(|_| Worker::new_lifo()).collect();
+    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
+    let active_counter = ActiveCounter::new();
+    
+    // Seed injector
+    injector.push((ignore_tip, starting_dir));
 
-    crossbeam_utils::thread::scope(|scope|{
+    let ignored_paths : Vec<std::path::PathBuf> = crossbeam_utils::thread::scope(|scope|
+    {   
+        let mut scopes : Vec<_> = Default::default();
 
         for worker in workers.into_iter() {
             let injector_borrow = &injector;
             let stealers_copy = stealers.clone();
+            let mut counter_copy = active_counter.clone();
 
-            scope.spawn(move |_| {
-                worker.push(5);
+            let s = scope.spawn(move |_| {
+                let backoff = crossbeam_utils::Backoff::new();
+                let mut worker_ignores : Vec<_> = Default::default();
 
-                while let Some(num) = find_task(&worker, injector_borrow, &stealers_copy) {
-                    println!("{}", num);
+                // Loop until all workers idle
+                loop {
+                    // Do work
+                    {
+                        let _work_token = counter_copy.take_token();
+                        while let Some((mut ignore_tip, entry)) = find_task(&worker, injector_borrow, &stealers_copy) {
+                            backoff.reset();
+
+                            || -> anyhow::Result<()> {
+                                // Dirs must be deferred so they can consider potential ignore files
+                                let mut dirs : Vec<std::path::PathBuf> = Default::default();
+
+                                // Process each child in directory
+                                let read_dir = match fs::read_dir(entry) {
+                                    Ok(inner) => inner,
+                                    Err(_) => return Ok(()),
+                                };
+
+                                for child in read_dir {
+                                    let child_path = child?.path();
+                                    let child_meta = match std::fs::metadata(&child_path) {
+                                        Ok(inner) => inner,
+                                        Err(_) => return Ok(())
+                                    };
+
+                                    // Child is file
+                                    if child_meta.is_file() {
+                                        // Child is ignorefile. Push it onto ignore stack
+                                        if child_path.file_name().unwrap() == ".gitignore" {
+                                            // Parse new .gitignore
+                                            let parent_path = child_path.parent()
+                                                .ok_or_else(|| anyhow!("Failed to get parent for [{:?}]", child_path))?;
+                                            
+                                            let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
+                                            ignore_builder.add(child_path);
+                                            let new_ignore = ignore_builder.build()?;
+                                            ignore_tip = ignore_tip.push(new_ignore);
+                                        } else {
+                                            // Child is file. Perform ignore test.
+                                            let is_ignored = ignore_tip.iter()
+                                                .map(|i| i.matched(&child_path, true))
+                                                .any(|m| m.is_ignore());
+
+                                            if is_ignored {
+                                                worker_ignores.push(child_path);
+                                            }
+                                        }
+                                    } else {
+                                        // Child is directory. Add to deferred dirs list
+                                        dirs.push(child_path);
+                                    }
+                                }
+
+                                // Process directories
+                                for dir in dirs.into_iter() {
+
+                                    // Check if ignored
+                                    let is_ignored = ignore_tip.iter()
+                                        .map(|i| i.matched(&dir, true))
+                                        .any(|m| m.is_ignore());
+
+                                    if is_ignored {
+                                        worker_ignores.push(dir);
+                                    } else {
+                                        worker.push((ignore_tip.clone(), dir));
+                                    }
+                                }
+                                
+                                Ok(())
+                            }().unwrap();
+                        } 
+                    }
+
+                    backoff.spin();
+
+                    if counter_copy.is_zero() {
+                        break;
+                    }
                 }
+
+                worker_ignores
             });
+
+            scopes.push(s);
         }
-/*
-        for _ in 0..num_threads {
-            let worker = Worker::new_lifo();
-            worker.push(6);
-            let stealer = worker.stealer();
-            stealers.push(stealer);
-            
-            scope.spawn(|_| {
-                //worker.push(5);
-                stealer.steal();
-                injector.push(3);
-            });
-        }
-*/
+
+        let result : Vec<std::path::PathBuf> = scopes.into_iter()
+            .map(|s| s.join().unwrap())
+            .flatten()
+            .collect();
+        result
+
     }).unwrap();
 
-
-    // Create worker threads
     /*
-    crossbeam_utils::thread::scope(|s|{
-
-        let injector = Injector::new();
-        let mut stealers : Vec<_> = Vec::with_capacity(num_threads);
-
-        injector.push(5);
-        injector.push(6);
-        injector.push(7);
-
-        for _ in 0..num_threads {
-            let worker = Worker::new_lifo(); // lifo = stack = dfs = minimize size
-            //stealers.push(worker.stealer());
-            
-            s.spawn(|_|{
-                let path = find_task(&worker2, &injector, &stealers);
-                println!("{:?}", path);
-            });
-        }
-
-    }).unwrap();
-    */
-
-
-
-    //injector.push(starting_dir);
-
-
-    // ---------------------------------------------------
-
-
     // Process all paths
     let start = Instant::now();
     while !queue.is_empty() {
@@ -211,6 +269,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
+    */
 
     // Print all ignored content
     println!("Ignored:");
@@ -231,6 +290,11 @@ fn main() -> anyhow::Result<()> {
 
     if final_ignore_paths.is_empty() {
         println!("No ignore paths to delete.");
+        return Ok(());
+    }
+
+    // Quit if we're in benchmark mode
+    if benchmark_mode {
         return Ok(());
     }
 
@@ -404,7 +468,6 @@ impl Drop for ActiveToken {
 #[test]
 fn test_crossbeam() {
     let root = env::current_dir().unwrap();
-    let root : std::path::PathBuf = "C:/temp".into();
     println!("Root: {:?}", &root);
 
     let num_threads = num_cpus::get();
