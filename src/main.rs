@@ -79,14 +79,6 @@ fn main() -> anyhow::Result<()> {
 
     // TODO: Recursively walk parents searching for gitignores above us
 
-    // List of all ignored paths
-    //let mut ignored_paths : Vec<std::path::PathBuf> = Default::default();
-
-    // Queue of paths to consider
-    //let mut queue : std::collections::VecDeque<(ImmutableStack<Gitignore>, std::path::PathBuf)> = Default::default();
-    //queue.push_back((ignore_tip, starting_dir));
-
-
     // Create crossbeam structs for work-stealing job queue
     let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
     let injector = Injector::new();
@@ -132,7 +124,7 @@ fn main() -> anyhow::Result<()> {
                                     let child_path = child?.path();
                                     let child_meta = match std::fs::metadata(&child_path) {
                                         Ok(inner) => inner,
-                                        Err(_) => return Ok(())
+                                        Err(_) => continue
                                     };
 
                                     // Child is file
@@ -204,74 +196,8 @@ fn main() -> anyhow::Result<()> {
 
     }).unwrap();
 
-    /*
-    // Process all paths
-    let start = Instant::now();
-    while !queue.is_empty() {
-        let (mut ignore_tip, entry) = queue.pop_front().unwrap();
-
-        // Dirs must be deferred so they can consider potential ignore files
-        let mut dirs : Vec<std::path::PathBuf> = Default::default();
-
-        // Process each child in directory
-        let read_dir = match fs::read_dir(entry) {
-            Ok(inner) => inner,
-            Err(_) => continue,
-        };
-
-        for child in read_dir {
-            let child_path = child?.path();
-            let child_meta = match std::fs::metadata(&child_path) {
-                Ok(inner) => inner,
-                Err(_) => continue
-            };
-
-            // Child is file
-            if child_meta.is_file() {
-                // Child is ignorefile. Push it onto ignore stack
-                if child_path.file_name().unwrap() == ".gitignore" {
-                    // Parse new .gitignore
-                    let parent_path = child_path.parent()
-                        .ok_or_else(|| anyhow!("Failed to get parent for [{:?}]", child_path))?;
-                    
-                    let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
-                    ignore_builder.add(child_path);
-                    let new_ignore = ignore_builder.build()?;
-                    ignore_tip = ignore_tip.push(new_ignore);
-                } else {
-                    // Child is file. Perform ignore test.
-                    let is_ignored = ignore_tip.iter()
-                        .map(|i| i.matched(&child_path, true))
-                        .any(|m| m.is_ignore());
-
-                    if is_ignored {
-                        ignored_paths.push(child_path);
-                    }
-                }
-            } else {
-                // Child is directory. Add to deferred dirs list
-                dirs.push(child_path);
-            }
-        }
-
-        // Process directories
-        for dir in dirs.into_iter() {
-
-            // Check if ignored
-            let is_ignored = ignore_tip.iter()
-                .map(|i| i.matched(&dir, true))
-                .any(|m| m.is_ignore());
-
-            if is_ignored {
-                ignored_paths.push(dir);
-            } else {
-                queue.push_back((ignore_tip.clone(), dir));
-            }
-        }
-    }
-    */
-
-    // Print all ignored content
+    // Print all ignored content, sorted by bytes
+    // TODO: parallelize with rayon
     println!("Ignored:");
     let mut total_bytes = 0;
     let mut final_ignore_paths : Vec<_> = Default::default();
@@ -434,6 +360,7 @@ fn find_task<T>(
     })
 }
 
+// Helpers to track when all workers are done
 #[derive(Clone)]
 struct ActiveCounter {
     active_count: Arc<AtomicUsize>
@@ -465,71 +392,3 @@ impl Drop for ActiveToken {
     }
 }
 
-#[test]
-fn test_crossbeam() {
-    let root = env::current_dir().unwrap();
-    println!("Root: {:?}", &root);
-
-    let num_threads = num_cpus::get();
-    //let num_threads = 1;
-
-    let workers : Vec<_> = (0..num_threads).map(|_| Worker::new_lifo()).collect();
-    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
-    
-    let injector = Injector::new();
-    injector.push(root);
-
-    let active_counter = ActiveCounter::new();
-
-    let start = Instant::now();
-
-    crossbeam_utils::thread::scope(|scope|{
-
-        for worker in workers.into_iter() {
-            let injector_borrow = &injector;
-            let stealers_copy = stealers.clone();
-            let mut counter_copy = active_counter.clone();
-
-            scope.spawn(move |_| {
-                let backoff = crossbeam_utils::Backoff::new();
-
-                loop {
-
-                    // Do work
-                    {
-                        let _work_token = counter_copy.take_token();
-                        while let Some(path) = find_task(&worker, injector_borrow, &stealers_copy) {
-                            backoff.reset();
-
-                            || -> anyhow::Result<()> {
-                                for child in fs::read_dir(path)? {
-                                    let child_path = child?.path();
-                                    let child_meta = std::fs::metadata(&child_path)?;
-
-                                    //println!("{:?}", child_path);
-                                    if child_meta.is_dir() {
-                                        worker.push(child_path);
-                                    }
-                                }
-
-                                Ok(())
-                            }().unwrap();
-                        } 
-                    }
-
-                    backoff.spin();
-
-                    if counter_copy.is_zero() {
-                        break;
-                    }
-                }
-            });
-        }
-    }).unwrap();
-
-    println!("Completed in: [{:?}]", start.elapsed());
-}
-
-// Get task
-// Do work
-// Get another task
