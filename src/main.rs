@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use clap::{Arg, App};
+use crossbeam_deque::{Injector, Stealer, Worker};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
@@ -57,12 +58,92 @@ fn main() -> anyhow::Result<()> {
         ignore_tip = ignore_stack.push(global_ignore);
     }
 
+    // TODO: Recursively walk parents searching for gitignores above us
+
     // List of all ignored paths
     let mut ignored_paths : Vec<std::path::PathBuf> = Default::default();
 
     // Queue of paths to consider
     let mut queue : std::collections::VecDeque<(ImmutableStack<Gitignore>, std::path::PathBuf)> = Default::default();
     queue.push_back((ignore_tip, starting_dir));
+
+
+    // ---------------------------------------------------
+
+
+
+    let num_threads = num_cpus::get();
+
+
+
+    let workers : Vec<_> = (0..num_threads).map(|_| Worker::<u8>::new_lifo()).collect();
+    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
+    
+    let injector = Injector::new();
+    injector.push(5);
+
+    crossbeam_utils::thread::scope(|scope|{
+
+        for worker in workers.into_iter() {
+            let injector_borrow = &injector;
+            let stealers_copy = stealers.clone();
+
+            scope.spawn(move |_| {
+                worker.push(5);
+
+                while let Some(num) = find_task(&worker, injector_borrow, &stealers_copy) {
+                    println!("{}", num);
+                }
+            });
+        }
+/*
+        for _ in 0..num_threads {
+            let worker = Worker::new_lifo();
+            worker.push(6);
+            let stealer = worker.stealer();
+            stealers.push(stealer);
+            
+            scope.spawn(|_| {
+                //worker.push(5);
+                stealer.steal();
+                injector.push(3);
+            });
+        }
+*/
+    }).unwrap();
+
+
+    // Create worker threads
+    /*
+    crossbeam_utils::thread::scope(|s|{
+
+        let injector = Injector::new();
+        let mut stealers : Vec<_> = Vec::with_capacity(num_threads);
+
+        injector.push(5);
+        injector.push(6);
+        injector.push(7);
+
+        for _ in 0..num_threads {
+            let worker = Worker::new_lifo(); // lifo = stack = dfs = minimize size
+            //stealers.push(worker.stealer());
+            
+            s.spawn(|_|{
+                let path = find_task(&worker2, &injector, &stealers);
+                println!("{:?}", path);
+            });
+        }
+
+    }).unwrap();
+    */
+
+
+
+    //injector.push(starting_dir);
+
+
+    // ---------------------------------------------------
+
 
     // Process all paths
     let start = Instant::now();
@@ -264,4 +345,52 @@ fn pretty_bytes(orig_amount: u64) -> String {
         8 => format!("{} Yotta", amount),
         _ => format!("{}", orig_amount)
     }
+}
+
+fn find_task<T>(
+    local: &Worker<T>,
+    global: &Injector<T>,
+    stealers: &[Stealer<T>],
+) -> Option<T> {
+    // Pop a task from the local queue, if not empty.
+    local.pop().or_else(|| {
+        // Otherwise, we need to look for a task elsewhere.
+        std::iter::repeat_with(|| {
+            // Try stealing a batch of tasks from the global queue.
+            global.steal_batch_and_pop(local)
+                // Or try stealing a task from one of the other threads.
+                .or_else(|| stealers.iter().map(|s| s.steal()).collect())
+        })
+        // Loop while no task was stolen and any steal operation needs to be retried.
+        .find(|s| !s.is_retry())
+        // Extract the stolen task, if there is one.
+        .and_then(|s| s.success())
+    })
+}
+
+#[test]
+fn test_crossbeam() {
+    let num_threads = num_cpus::get();
+
+
+
+    let workers : Vec<_> = (0..num_threads).map(|_| Worker::<u8>::new_lifo()).collect();
+    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
+    
+    let injector = Injector::new();
+    injector.push(5);
+
+    crossbeam_utils::thread::scope(|scope|{
+
+        for worker in workers.into_iter() {
+            let injector_borrow = &injector;
+            let stealers_copy = stealers.clone();
+
+            scope.spawn(move |_| {
+                while let Some(num) = find_task(&worker, injector_borrow, &stealers_copy) {
+                    println!("{}", num);
+                }
+            });
+        }
+    }).unwrap();
 }
