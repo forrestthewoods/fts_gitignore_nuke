@@ -5,6 +5,8 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 mod immutable_stack;
@@ -368,29 +370,103 @@ fn find_task<T>(
     })
 }
 
+#[derive(Clone)]
+struct ActiveCounter {
+    active_count: Arc<AtomicUsize>
+}
+
+impl ActiveCounter {
+    pub fn take_token(&mut self) -> ActiveToken {
+        self.active_count.fetch_add(1, Ordering::SeqCst);
+        ActiveToken { active_count: self.active_count.clone() }
+    }
+
+    pub fn new() -> ActiveCounter {
+        ActiveCounter { active_count: Arc::new(AtomicUsize::new(0)) }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.active_count.load(Ordering::SeqCst) == 0
+    }
+}
+
+
+struct ActiveToken {
+    active_count: Arc<AtomicUsize>
+}
+
+impl Drop for ActiveToken {
+    fn drop(&mut self) {
+        self.active_count.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[test]
 fn test_crossbeam() {
+    let root = env::current_dir().unwrap();
+    let root : std::path::PathBuf = "C:/temp".into();
+    println!("Root: {:?}", &root);
+
     let num_threads = num_cpus::get();
+    //let num_threads = 1;
 
-
-
-    let workers : Vec<_> = (0..num_threads).map(|_| Worker::<u8>::new_lifo()).collect();
+    let workers : Vec<_> = (0..num_threads).map(|_| Worker::new_lifo()).collect();
     let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
     
     let injector = Injector::new();
-    injector.push(5);
+    injector.push(root);
+
+    let active_counter = ActiveCounter::new();
+
+    let start = Instant::now();
 
     crossbeam_utils::thread::scope(|scope|{
 
         for worker in workers.into_iter() {
             let injector_borrow = &injector;
             let stealers_copy = stealers.clone();
+            let mut counter_copy = active_counter.clone();
 
             scope.spawn(move |_| {
-                while let Some(num) = find_task(&worker, injector_borrow, &stealers_copy) {
-                    println!("{}", num);
+                let backoff = crossbeam_utils::Backoff::new();
+
+                loop {
+
+                    // Do work
+                    {
+                        let _work_token = counter_copy.take_token();
+                        while let Some(path) = find_task(&worker, injector_borrow, &stealers_copy) {
+                            backoff.reset();
+
+                            || -> anyhow::Result<()> {
+                                for child in fs::read_dir(path)? {
+                                    let child_path = child?.path();
+                                    let child_meta = std::fs::metadata(&child_path)?;
+
+                                    //println!("{:?}", child_path);
+                                    if child_meta.is_dir() {
+                                        worker.push(child_path);
+                                    }
+                                }
+
+                                Ok(())
+                            }().unwrap();
+                        } 
+                    }
+
+                    backoff.spin();
+
+                    if counter_copy.is_zero() {
+                        break;
+                    }
                 }
             });
         }
     }).unwrap();
+
+    println!("Completed in: [{:?}]", start.elapsed());
 }
+
+// Get task
+// Do work
+// Get another task
