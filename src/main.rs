@@ -12,6 +12,8 @@ use std::time::Instant;
 mod immutable_stack;
 use immutable_stack::ImmutableStack;
 
+mod job_system;
+
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
     let cpus_str = num_cpus::get_physical().to_string();
