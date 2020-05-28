@@ -1,23 +1,6 @@
 use crossbeam_deque::{Injector, Stealer, Worker};
 
-/*
-impl<IN,OUT> struct Scheduler 
-{
-    injector: Injector<IN>,
-    job: Fn(worker: &Worker<IN>) -> OUT
-}
-
-impl<IN,OUT> Scheduler {
-    pub(crate) fn new(num_threads: usize, job: Fn(&Worker<IN> -> OUT) -> Self {
-        let injector = Injector::new()
-
-        Scheduler {
-            injector : Injector::new(),
-    }    
-}
-*/
-
-fn run_job<IN,OUT,JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT> 
+pub fn run_job<IN,OUT,JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT> 
 where 
     IN: Send,
     OUT: Send,
@@ -76,7 +59,7 @@ where
         }
 
         scopes.into_iter()
-            .map(|s| s.join().unwrap())
+            .filter_map(|s| s.join().ok())
             .flatten()
             .collect()
     }).unwrap();

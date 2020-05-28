@@ -1,10 +1,11 @@
 use anyhow::anyhow;
 use clap::{Arg, App};
 use crossbeam_deque::{Injector, Stealer, Worker};
-use ignore::gitignore::GitignoreBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -100,6 +101,88 @@ fn main() -> anyhow::Result<()> {
         ignore_tip = ignore_stack.push(ignore);
     }
 
+    let initial_data = vec![(ignore_tip, starting_dir)];
+    let job = |(mut ignore_tip, entry): (ImmutableStack<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
+        
+        let mut job_ignores : Vec<_> = Default::default();
+        let mut dirs : Vec<std::path::PathBuf> = Default::default();
+
+        // Process each child in directory
+        let read_dir = match fs::read_dir(entry) {
+            Ok(inner) => inner,
+            Err(_) => return None,
+        };
+
+        for child in read_dir {
+            let child_path = match child {
+                Ok(child) => child.path(),
+                Err(_) => continue
+            };
+
+            let child_meta = match std::fs::metadata(&child_path) {
+                Ok(inner) => inner,
+                Err(_) => continue
+            };
+
+            // Child is file
+            if child_meta.is_file() {
+                // Child is ignorefile. Push it onto ignore stack
+                if child_path.file_name().unwrap() == ".gitignore" {
+                    // Parse new .gitignore
+                    let parent_path = match child_path.parent() {
+                        Some(parent_path) => parent_path,
+                        None => continue
+                    };
+
+                    let mut ignore_builder = GitignoreBuilder::new(parent_path);
+                    ignore_builder.add(child_path);
+                    let new_ignore = match ignore_builder.build() {
+                        Ok(ignore) => ignore,
+                        Err(_) => continue
+                    };
+
+                    ignore_tip = ignore_tip.push(new_ignore);
+                } else {
+                    // Child is file. Perform ignore test.
+                    let is_ignored = ignore_tip.iter()
+                        .map(|i| i.matched(&child_path, true))
+                        .any(|m| m.is_ignore());
+
+                    if is_ignored {
+                        job_ignores.push(child_path);
+                    }
+                }
+            } else {
+                // Child is directory. Add to deferred dirs list
+                dirs.push(child_path);
+            }
+        }
+
+        // Process directories
+        for dir in dirs.into_iter() {
+
+            // Check if ignored
+            let is_ignored = ignore_tip.iter()
+                .map(|i| i.matched(&dir, true))
+                .any(|m| m.is_ignore());
+
+            if is_ignored {
+                job_ignores.push(dir);
+            } else {
+                worker.push((ignore_tip.clone(), dir));
+            }
+        }
+        
+        Some(job_ignores)
+    };
+
+    let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
+    let job_result = job_system::run_job(initial_data, job, num_threads);
+    let ignored_paths : Vec<PathBuf> = job_result.into_iter()
+        .flatten()
+        .collect();
+
+/*
     // Create crossbeam structs for work-stealing job queue
     let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
     let injector = Injector::new();
@@ -216,6 +299,7 @@ fn main() -> anyhow::Result<()> {
         result
 
     }).unwrap();
+*/
 
     // Print all ignored content, sorted by bytes
     // TODO: parallelize with rayon
