@@ -77,7 +77,26 @@ fn main() -> anyhow::Result<()> {
         ignore_tip = ignore_stack.push(global_ignore);
     }
 
-    // TODO: Recursively walk parents searching for gitignores above us
+    // Search for ignores in parent directories
+    let mut parent_ignores : Vec<_>  = Default::default();
+    let mut dir : &std::path::Path = &starting_dir;
+    while let Some(parent_path) = dir.parent() {
+        let ignore_path = parent_path.join(".gitignore");
+        if ignore_path.exists() {
+            let mut ignore_builder = GitignoreBuilder::new(parent_path);
+            ignore_builder.add(ignore_path);
+            if let Ok(ignore) = ignore_builder.build() {
+                parent_ignores.push(ignore);
+            }
+        }
+
+        dir = parent_path;
+    }
+
+    // Push parent ignores onto ignore_stack
+    for ignore in parent_ignores.into_iter().rev() {
+        ignore_tip = ignore_stack.push(ignore);
+    }
 
     // Create crossbeam structs for work-stealing job queue
     let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
@@ -135,7 +154,7 @@ fn main() -> anyhow::Result<()> {
                                             let parent_path = child_path.parent()
                                                 .ok_or_else(|| anyhow!("Failed to get parent for [{:?}]", child_path))?;
                                             
-                                            let mut ignore_builder = ignore::gitignore::GitignoreBuilder::new(parent_path);
+                                            let mut ignore_builder = GitignoreBuilder::new(parent_path);
                                             ignore_builder.add(child_path);
                                             let new_ignore = ignore_builder.build()?;
                                             ignore_tip = ignore_tip.push(new_ignore);
