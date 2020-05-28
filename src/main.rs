@@ -238,7 +238,7 @@ fn main() -> anyhow::Result<()> {
     let t0 = t0.elapsed();
 
     // Sum sizes
-    let ignore_path_sizes : Vec<u64> = Default::default();
+    let mut ignore_path_sizes : Vec<u64> = Default::default();
     ignore_path_sizes.resize(ignored_paths.len(), 0);
     for (idx, size) in dir_sizes {
         ignore_path_sizes[idx] += size;
@@ -247,6 +247,7 @@ fn main() -> anyhow::Result<()> {
     let t1 = Instant::now();
     let final_ignore_paths : Vec<_> = ignored_paths.into_iter()
         .zip(ignore_path_sizes)
+        .map(|((_,path), size)| (path, size))
         .filter(|(_, size)| *size >= min_filesize_in_bytes)
         .sorted_by_key(|kvp| kvp.1)
         .collect();
