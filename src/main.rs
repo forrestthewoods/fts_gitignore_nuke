@@ -232,52 +232,42 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Compute path sizes
-    let start2 = Instant::now();
+    let t0 = Instant::now();
     let final_ignore_paths = job_system::run_recursive_job(ignored_paths, recursive_dir_size_job, num_threads);
+    let t0 = t0.elapsed();
 
+    let t1 = Instant::now();
     let final_ignore_paths : Vec<_> = final_ignore_paths.into_iter()
         .filter(|(_, size)| *size >= min_filesize_in_bytes)
         .sorted_by_key(|kvp| kvp.1)
         .collect();
+    let t1 = t1.elapsed();
 
-    let mut total_bytes = 0;
-    for (path, bytes) in &final_ignore_paths {
-        total_bytes += bytes;
-        if !benchmark_mode {
-            //println!("  {:10} {:?}", pretty_bytes(*bytes), path);
-        }
-    }
-    println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
-    println!("Search Time: {:?}", start.elapsed());
-    println!("Search Time2: {:?}", start2.elapsed());
-
-
-    // Print all ignored content, sorted by bytes
-    // TODO: parallelize with rayon
-    /*
-    println!("Ignored:");
-    let mut total_bytes = 0;
-    let mut final_ignore_paths : Vec<_> = Default::default();
-    ignored_paths.into_iter()
-        .map(|dir| (dir_size(dir.clone()), dir))
-        .filter_map(|(bytes, dir)| if let Ok(bytes) = bytes { Some((bytes, dir)) } else { None })
-        .filter(|(bytes, _)| *bytes >= min_filesize_in_bytes)
-        .sorted_by_key(|kvp| kvp.0)
-        .for_each(|(bytes, path)| {
-            total_bytes += bytes;
-            println!("  {:10} {:?}", pretty_bytes(bytes), path);
-            final_ignore_paths.push(path);
-        });
-    println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
-    println!("Search Time: {:?}", start.elapsed());
-    */
-
+    // No ignores found
     if final_ignore_paths.is_empty() {
         println!("No ignore paths to delete.");
         return Ok(());
     }
 
-    // Quit if we're in benchmark mode
+    // Print ignores
+    let t2 = Instant::now();
+    let mut total_bytes = 0;
+    for (path, bytes) in &final_ignore_paths {
+        total_bytes += bytes;
+        if !benchmark_mode {
+            println!("  {:10} {:?}", pretty_bytes(*bytes), path);
+        }
+    }
+    let t2 = t2.elapsed();
+
+    println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
+    println!("Time: {:?}", start.elapsed());
+    
+    // TEMP
+    println!("\nCalcSize Time {:?}", t0);
+    println!("Sort Time: {:?}", t1);
+    println!("Print Time: {:?}", t2);
+
     if benchmark_mode {
         return Ok(());
     }
@@ -342,40 +332,6 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Recursively calculate size of all files within a single directory
-/*
-fn dir_size(path: std::path::PathBuf) -> anyhow::Result<u64> {
-    // Input path may be file
-    let meta = fs::metadata(&path)?;
-    if meta.is_file() {
-        return Ok(meta.len());
-    }
-    
-    // Recursively compute pathsize
-    let mut result = 0;
-
-    let mut dirs = vec![path];
-    while !dirs.is_empty() {
-        let dir = dirs.pop().unwrap();
-
-        // Process each element in dir
-        for child in fs::read_dir(dir)? {
-            let child_path = child?.path();
-            let meta = fs::metadata(&child_path)?;
-            if meta.is_file() {
-                // Add file sizes to result
-                result += meta.len();
-            } else {
-                // Add directories to queue for processing
-                dirs.push(child_path);
-            }
-        }
-    }
-
-    Ok(result)
-}
-*/
-
 // Print u64 bytes value as a suffixed string
 fn pretty_bytes(orig_amount: u64) -> String {
     let mut amount = orig_amount;
@@ -398,5 +354,3 @@ fn pretty_bytes(orig_amount: u64) -> String {
         _ => format!("{}", orig_amount)
     }
 }
-
-
