@@ -232,6 +232,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Compute path sizes
+    let start2 = Instant::now();
     let final_ignore_paths = job_system::run_recursive_job(ignored_paths, recursive_dir_size_job, num_threads);
 
     let final_ignore_paths : Vec<_> = final_ignore_paths.into_iter()
@@ -242,10 +243,11 @@ fn main() -> anyhow::Result<()> {
     let mut total_bytes = 0;
     for (path, bytes) in &final_ignore_paths {
         total_bytes += bytes;
-        println!("  {:10} {:?}", pretty_bytes(*bytes), path);
+        //println!("  {:10} {:?}", pretty_bytes(*bytes), path);
     }
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
     println!("Search Time: {:?}", start.elapsed());
+    println!("Search Time2: {:?}", start2.elapsed());
 
 
     // Print all ignored content, sorted by bytes
