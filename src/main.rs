@@ -243,7 +243,9 @@ fn main() -> anyhow::Result<()> {
     let mut total_bytes = 0;
     for (path, bytes) in &final_ignore_paths {
         total_bytes += bytes;
-        //println!("  {:10} {:?}", pretty_bytes(*bytes), path);
+        if !benchmark_mode {
+            //println!("  {:10} {:?}", pretty_bytes(*bytes), path);
+        }
     }
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
     println!("Search Time: {:?}", start.elapsed());
