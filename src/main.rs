@@ -181,13 +181,14 @@ fn main() -> anyhow::Result<()> {
     let initial_data = vec![(ignore_tip, starting_dir)];
 
     // Run recursive jobs
-    let ignored_paths = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
+    let ignored_paths : Vec<_> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
         .into_iter()
         .flatten()
+        .enumerate()
         .collect();
     
     // Second recursive job to compute size of ignored directories
-    let recursive_dir_size_job = |path: PathBuf, worker: &Worker<_>| -> Option<(PathBuf, u64)> {
+    let recursive_dir_size_job = |(root_idx, path): (usize, PathBuf), worker: &Worker<_>| -> Option<(usize, u64)> {
         // Get type of path
         let path_meta = match fs::metadata(&path) {
             Ok(meta) => meta,
@@ -196,7 +197,7 @@ fn main() -> anyhow::Result<()> {
 
         // If file, return result immediately
         if path_meta.is_file() {
-            return Some((path, path_meta.len()));
+            return Some((root_idx, path_meta.len()));
         }
 
         // Get director iterator
@@ -224,20 +225,28 @@ fn main() -> anyhow::Result<()> {
             if child_meta.is_file() {
                 files_size += child_meta.len();
             } else {
-                worker.push(child_path);
+                worker.push((root_idx, child_path));
             }
         }
         
-        Some((path, files_size))
+        Some((root_idx, files_size))
     };
 
     // Compute path sizes
     let t0 = Instant::now();
-    let final_ignore_paths = job_system::run_recursive_job(ignored_paths, recursive_dir_size_job, num_threads);
+    let dir_sizes = job_system::run_recursive_job(ignored_paths.clone(), recursive_dir_size_job, num_threads);
     let t0 = t0.elapsed();
 
+    // Sum sizes
+    let ignore_path_sizes : Vec<u64> = Default::default();
+    ignore_path_sizes.resize(ignored_paths.len(), 0);
+    for (idx, size) in dir_sizes {
+        ignore_path_sizes[idx] += size;
+    }
+
     let t1 = Instant::now();
-    let final_ignore_paths : Vec<_> = final_ignore_paths.into_iter()
+    let final_ignore_paths : Vec<_> = ignored_paths.into_iter()
+        .zip(ignore_path_sizes)
         .filter(|(_, size)| *size >= min_filesize_in_bytes)
         .sorted_by_key(|kvp| kvp.1)
         .collect();
