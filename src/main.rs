@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use clap::{Arg, App};
 use crossbeam_deque::Worker;
 use ignore::{ gitignore::{Gitignore, GitignoreBuilder}};
@@ -51,10 +51,26 @@ fn main() -> anyhow::Result<()> {
             .value_name("PRINT_GLOB_MATCHES")
             .required(false)
             .takes_value(false))
+        .arg(Arg::with_name("print_errors")
+            .long("print_errors")
+            .value_name("PRINT_ERRORS")
+            .required(false)
+            .takes_value(false))
         .get_matches();
 
+    // Pull bools out of args
     let benchmark_mode = matches.is_present("benchmark");
     let print_glob_matches = matches.is_present("print_glob_matches");
+    let print_errors = matches.is_present("print_errors");
+
+    // Helper to print result if it's an error and print_errors is true
+    let check_error = |e: anyhow::Result<()>| { 
+        if print_errors {
+            if let Err(e) = e {
+                println!("Error: [{:#}]", e);
+            }
+        }
+    };
     
     // Determine starting dir
     let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
@@ -112,71 +128,70 @@ fn main() -> anyhow::Result<()> {
         
         let mut job_ignores : Vec<_> = Default::default();
 
-        // Process each child in directory
-        let read_dir = match fs::read_dir(&path) {
-            Ok(inner) => inner,
-            Err(_) => return None,
-        };
+        // Get iterator to directory children
+        let read_dir = fs::read_dir(&path).ok()?;
 
         // Check for existing of gitignore
         let ignore_path = path.join(".gitignore");
         if ignore_path.exists() {
             let mut ignore_builder = GitignoreBuilder::new(&path);
             ignore_builder.add(ignore_path);
-            match ignore_builder.build() {
-                Ok(ignore) => { ignore_tip = ignore_tip.push(ignore); },
-                Err(_) => ()
-            };
+            if let Ok(ignore) = ignore_builder.build() {
+                ignore_tip = ignore_tip.push(ignore);
+            }
         }
-        
 
+        // Process each child in directory
         for child in read_dir {
-            let child_path = match child {
-                Ok(child) => child.path(),
-                Err(_) => continue
-            };
 
-            let child_meta = match std::fs::metadata(&child_path) {
-                Ok(inner) => inner,
-                Err(_) => continue
-            };
-
-            // .gitignore is handled explicitly before loop
-            if child_meta.is_file() && child_path.file_name().unwrap() == ".gitignore" {
+            let result = || -> anyhow::Result<()> {
+                let child_path = child
+                    .with_context(||format!("fs:read_dir {:?}", path.display()))?
+                    .path();
+                let child_meta = std::fs::metadata(&child_path)
+                    .with_context(||format!("fs::metadata {:?}", child_path.display()))?;
+    
                 // .gitignore is handled explicitly before loop
-                continue;
-            } 
-
-            // Test if child_path is ignored, whitelisted, or neither
-            let is_dir = child_meta.is_dir();
-            let ignore_match = ignore_tip.iter()
-                .map(|i| i.matched(&child_path, is_dir))
-                .filter(|m| !m.is_none())
-                .next();
-            
-            match ignore_match {
-                Some(m) => {
-                    // Matched, either ignored or whitelisted
-                    if print_glob_matches {
-                        let glob = m.inner().unwrap();
-                        println!("Glob [{:?}] from Gitignore [{:?}] matched path [{:?}]",
-                            glob.original(), glob.from(), child_path);
-                    }
-
-                    // Add ignores to the list. Do nothing if whitelisted
-                    if m.is_ignore() {
-                        job_ignores.push(child_path);
-                    } else {
-                        assert!(m.is_whitelist());
-                    }
-                },
-                None => {
-                    // No match, recurse into directories
-                    if is_dir {
-                        worker.push((ignore_tip.clone(), child_path));
+                if child_meta.is_file() && child_path.file_name().unwrap() == ".gitignore" {
+                    return Ok(());
+                } 
+    
+                // Test if child_path is ignored, whitelisted, or neither
+                // Return first match that is either ignored or whitelisted
+                let is_dir = child_meta.is_dir();
+                let ignore_match = ignore_tip.iter()
+                    .map(|i| i.matched(&child_path, is_dir))
+                    .filter(|m| !m.is_none())
+                    .next();
+                
+                // Handle ignored/whitelisted/neither
+                match ignore_match {
+                    Some(m) => {
+                        //  ignored or whitelisted
+                        if print_glob_matches {
+                            let glob = m.inner().unwrap();
+                            println!("Glob [{:?}] from Gitignore [{:?}] matched path [{:?}]",
+                                glob.original(), glob.from(), child_path);
+                        }
+    
+                        // Add ignores to the list. Do nothing if whitelisted
+                        if m.is_ignore() {
+                            job_ignores.push(child_path);
+                        } else {
+                            assert!(m.is_whitelist());
+                        }
+                    },
+                    None => {
+                        // No match, recurse into directories
+                        if is_dir {
+                            worker.push((ignore_tip.clone(), child_path));
+                        }
                     }
                 }
-            }
+
+                Ok(())
+            }();
+            check_error(result);           
         }
         
         Some(job_ignores)
@@ -196,10 +211,7 @@ fn main() -> anyhow::Result<()> {
     // Second recursive job to compute size of ignored directories
     let recursive_dir_size_job = |(root_idx, path): (usize, PathBuf), worker: &Worker<_>| -> Option<(usize, u64)> {
         // Get type of path
-        let path_meta = match fs::metadata(&path) {
-            Ok(meta) => meta,
-            Err(_) => return None
-        };
+        let path_meta = fs::metadata(&path).ok()?;
 
         // If file, return result immediately
         if path_meta.is_file() {
@@ -207,32 +219,31 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Get director iterator
-        let read_dir = match fs::read_dir(&path) {
-            Ok(read_dir) => read_dir,
-            Err(_) => return None
-        };
+        let read_dir = fs::read_dir(&path).ok()?;
 
         // Iterate children
         let mut files_size = 0;
         for child in read_dir {
-            // Ignore errors
-            let child_path = match child {
-                Ok(entry) => entry.path(),
-                Err(_) => continue
-            };
 
-            let child_meta = match fs::metadata(&child_path) {
-                Ok(meta) => meta,
-                Err(_) => continue
-            };
+            let result = || -> anyhow::Result<()> {
+                // Ignore errors
+                let child_path = child
+                    .with_context(||format!("fs::read_dir {:?}", path.display()))?
+                    .path();
+                let child_meta = fs::metadata(&child_path)
+                    .with_context(||format!("fs::metadata {:?}",child_path))?;
 
-            // Accumualte file size
-            // Add directories to the worker
-            if child_meta.is_file() {
-                files_size += child_meta.len();
-            } else {
-                worker.push((root_idx, child_path));
-            }
+                // Accumualte file size
+                // Add directories to the worker
+                if child_meta.is_file() {
+                    files_size += child_meta.len();
+                } else {
+                    worker.push((root_idx, child_path));
+                }
+
+                Ok(())
+            }();
+            check_error(result);
         }
         
         Some((root_idx, files_size))
@@ -294,27 +305,23 @@ fn main() -> anyhow::Result<()> {
 
     // Helper to remove either a file or a directory
     let remove_path = |path: &std::path::Path| {
-        let meta = match fs::metadata(&path) {
-            Ok(meta) => meta,
-            Err(e) => {
-                println!("Unable to nuke [{:?}]. Failed to query metadata. Error: [{:?}]", path, e);
-                return;
-            }
-        };
 
-        if meta.is_file() {
-            // Delete file
-            match std::fs::remove_file(&path) {
-                Ok(_) => (),
-                Err(e) => println!("Unable to nuke file [{:?}]. Error: [{:?}]", path, e)
-            };
-        } else {
-            // Delete directory
-            match std::fs::remove_dir_all(&path) {
-                Ok(_) => (),
-                Err(e) => println!("Unable to nuke directory [{:?}]. Directory may be partially deleted. Error: [{:?}]", path, e)
-            };
-        }
+        let result = || -> anyhow::Result<()> {
+            let meta = fs::metadata(&path)
+                .with_context(||format!("fs::metadata {}", path.display()))?;
+            
+            // Remove file or directory
+            if meta.is_file() {
+                std::fs::remove_file(&path)
+                    .with_context(||format!("fs::remove_file {}", path.display()))?;
+            } else {
+                std::fs::remove_dir_all(&path)
+                    .with_context(||format!("fs::remove_dir_all {}", path.display()))?;
+            }
+
+            Ok(())
+        }();
+        check_error(result);
     };
 
     // Loop to get confirmation to nuke data or quit
