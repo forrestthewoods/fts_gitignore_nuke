@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::{Arg, App};
 use crossbeam_deque::Worker;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::{ gitignore::{Gitignore, GitignoreBuilder}};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
@@ -147,37 +147,35 @@ fn main() -> anyhow::Result<()> {
                 continue;
             } 
 
-            // Test if child_path is ignored
+            // Test if child_path is ignored, whitelisted, or neither
             let is_dir = child_meta.is_dir();
-            let mut recurse = true;
-            for ignore in ignore_tip.iter() {
-                match ignore.matched(&child_path, is_dir) {
-                    ignore::Match::Ignore(inner) => {
-                        // Path is ignored
+            let ignore_match = ignore_tip.iter()
+                .map(|i| i.matched(&child_path, is_dir))
+                .filter(|m| !m.is_none())
+                .next();
+            
+            match ignore_match {
+                Some(m) => {
+                    // Matched, either ignored or whitelisted
+                    if print_glob_matches {
+                        let glob = m.inner().unwrap();
+                        println!("Glob [{:?}] from Gitignore [{:?}] matched path [{:?}]",
+                            glob.original(), glob.from(), child_path);
+                    }
 
-                        // Print match details if flag is set
-                        if print_glob_matches {
-                            println!("Glob [{:?}] from Gitignore [{:?}] matched file [{:?}]",
-                                inner.original(),
-                                ignore.path(),
-                                child_path);
-                        }
-
+                    // Add ignores to the list. Do nothing if whitelisted
+                    if m.is_ignore() {
                         job_ignores.push(child_path);
-                        recurse = false;
-                        break;
-                    },
-                    ignore::Match::Whitelist(_) => { 
-                        // whitelisted
-                        recurse = false;
-                        break;
-                    },
-                    ignore::Match::None => {} // keep testing 
-                };                
-            }
-
-            if recurse && is_dir {
-                worker.push((ignore_tip.clone(), child_path));
+                    } else {
+                        assert!(m.is_whitelist());
+                    }
+                },
+                None => {
+                    // No match, recurse into directories
+                    if is_dir {
+                        worker.push((ignore_tip.clone(), child_path));
+                    }
+                }
             }
         }
         
