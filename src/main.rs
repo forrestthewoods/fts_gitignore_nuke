@@ -46,9 +46,15 @@ fn main() -> anyhow::Result<()> {
             .help("Run benchmark. Auto-quit after walking directory")
             .required(false)
             .takes_value(false))
+        .arg(Arg::with_name("print_glob_matches")
+            .long("print_glob_matches")
+            .value_name("PRINT_GLOB_MATCHES")
+            .required(false)
+            .takes_value(false))
         .get_matches();
 
     let benchmark_mode = matches.is_present("benchmark");
+    let print_glob_matches = matches.is_present("print_glob_matches");
     
     // Determine starting dir
     let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
@@ -105,13 +111,24 @@ fn main() -> anyhow::Result<()> {
     let recursive_job = |(mut ignore_tip, path): (ImmutableStack<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
         
         let mut job_ignores : Vec<_> = Default::default();
-        let mut dirs : Vec<std::path::PathBuf> = Default::default();
 
         // Process each child in directory
-        let read_dir = match fs::read_dir(path) {
+        let read_dir = match fs::read_dir(&path) {
             Ok(inner) => inner,
             Err(_) => return None,
         };
+
+        // Check for existing of gitignore
+        let ignore_path = path.join(".gitignore");
+        if ignore_path.exists() {
+            let mut ignore_builder = GitignoreBuilder::new(&path);
+            ignore_builder.add(ignore_path);
+            match ignore_builder.build() {
+                Ok(ignore) => { ignore_tip = ignore_tip.push(ignore); },
+                Err(_) => ()
+            };
+        }
+        
 
         for child in read_dir {
             let child_path = match child {
@@ -124,52 +141,43 @@ fn main() -> anyhow::Result<()> {
                 Err(_) => continue
             };
 
-            // Child is file
-            if child_meta.is_file() {
-                // Child is ignorefile. Push it onto ignore stack
-                if child_path.file_name().unwrap() == ".gitignore" {
-                    // Parse new .gitignore
-                    let parent_path = match child_path.parent() {
-                        Some(parent_path) => parent_path,
-                        None => continue
-                    };
+            // .gitignore is handled explicitly before loop
+            if child_meta.is_file() && child_path.file_name().unwrap() == ".gitignore" {
+                // .gitignore is handled explicitly before loop
+                continue;
+            } 
 
-                    let mut ignore_builder = GitignoreBuilder::new(parent_path);
-                    ignore_builder.add(child_path);
-                    let new_ignore = match ignore_builder.build() {
-                        Ok(ignore) => ignore,
-                        Err(_) => continue
-                    };
+            // Test if child_path is ignored
+            let is_dir = child_meta.is_dir();
+            let mut recurse = true;
+            for ignore in ignore_tip.iter() {
+                match ignore.matched(&child_path, is_dir) {
+                    ignore::Match::Ignore(inner) => {
+                        // Path is ignored
 
-                    ignore_tip = ignore_tip.push(new_ignore);
-                } else {
-                    // Child is file. Perform ignore test.
-                    let is_ignored = ignore_tip.iter()
-                        .map(|i| i.matched(&child_path, true))
-                        .any(|m| m.is_ignore());
+                        // Print match details if flag is set
+                        if print_glob_matches {
+                            println!("Glob [{:?}] from Gitignore [{:?}] matched file [{:?}]",
+                                inner.original(),
+                                ignore.path(),
+                                child_path);
+                        }
 
-                    if is_ignored {
                         job_ignores.push(child_path);
-                    }
-                }
-            } else {
-                // Child is directory. Add to deferred dirs list
-                dirs.push(child_path);
+                        recurse = false;
+                        break;
+                    },
+                    ignore::Match::Whitelist(_) => { 
+                        // whitelisted
+                        recurse = false;
+                        break;
+                    },
+                    ignore::Match::None => {} // keep testing 
+                };                
             }
-        }
 
-        // Process directories
-        for dir in dirs.into_iter() {
-
-            // Check if ignored
-            let is_ignored = ignore_tip.iter()
-                .map(|i| i.matched(&dir, true))
-                .any(|m| m.is_ignore());
-
-            if is_ignored {
-                job_ignores.push(dir);
-            } else {
-                worker.push((ignore_tip.clone(), dir));
+            if recurse && is_dir {
+                worker.push((ignore_tip.clone(), child_path));
             }
         }
         
