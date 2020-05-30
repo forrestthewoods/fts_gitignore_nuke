@@ -297,9 +297,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Compute path sizes
-    let t0 = Instant::now();
     let dir_sizes = job_system::run_recursive_job(ignored_paths.clone(), recursive_dir_size_job, num_threads);
-    let t0 = t0.elapsed();
 
     // Sum sizes
     let mut ignore_path_sizes : Vec<u64> = Default::default();
@@ -308,14 +306,13 @@ fn main() -> anyhow::Result<()> {
         ignore_path_sizes[idx] += size;
     }
 
-    let t1 = Instant::now();
+    // Sort ignored paths by size
     let final_ignore_paths : Vec<_> = ignored_paths.into_iter()
         .zip(ignore_path_sizes)
         .map(|((_,path), size)| (path, size))
         .filter(|(_, size)| *size >= min_filesize_in_bytes)
         .sorted_by_key(|kvp| kvp.1)
         .collect();
-    let t1 = t1.elapsed();
 
     // No ignores found
     if final_ignore_paths.is_empty() {
@@ -324,7 +321,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Print ignores
-    let t2 = Instant::now();
     let mut total_bytes = 0;
     for (path, bytes) in &final_ignore_paths {
         total_bytes += bytes;
@@ -332,16 +328,10 @@ fn main() -> anyhow::Result<()> {
             println!("  {:10} {:?}", pretty_bytes(*bytes), path);
         }
     }
-    let t2 = t2.elapsed();
-
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
     println!("Time: {:?}", start.elapsed());
     
-    // TEMP
-    println!("\nCalcSize Time {:?}", t0);
-    println!("Sort Time: {:?}", t1);
-    println!("Print Time: {:?}", t2);
-
+    // Skip NUKE op in benchmark mode
     if benchmark_mode {
         return Ok(());
     }
@@ -405,6 +395,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Mission accomplished
     Ok(())
 }
 
