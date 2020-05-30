@@ -8,7 +8,7 @@ This is useful because it allows deleting build output from many projects in one
 
 # Installation
 
-`fts_gitignore_nuke` can currently be run by cloning this repo and `cargo build --release`. Cargo installation coming soon. Pre-built binaries may be provided if there is sufficient interest.
+`fts_gitignore_nuke` can currently be installed via `cargo install fts_gitignore_nuke`.
 
 # Usage
 Compile `fts_gitignore_nuke` and run from or on any directory. No files will be deleted without explicit user inputs.
@@ -38,7 +38,7 @@ OPTIONS:
 
 # Support
 
-`fts_gitignore_nuke` was built for Windows. It should work on other platforms, but has not been tested.
+`fts_gitignore_nuke` was built for Windows. It should work on other platforms, but has not been tested. This tool was written for personal use cases and may require slight modification to support different environments or workflows. Pull requests welcome!
 
 # Performance
 
