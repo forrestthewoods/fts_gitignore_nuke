@@ -131,7 +131,6 @@ fn main() -> anyhow::Result<()> {
         let mut dir : &std::path::Path = &starting_dir;
         while let Some(parent_path) = dir.parent() {
             let ignore_path = parent_path.join(".gitignore");
-            println!("HACK [{}] [{}] [{}]", ignore_path.exists(), ignore_path.display(), parent_path.display());
             if ignore_path.exists() {
                 let mut ignore_builder = GitignoreBuilder::new(parent_path);
                 ignore_builder.add(ignore_path);
@@ -227,26 +226,8 @@ fn main() -> anyhow::Result<()> {
         Some(job_ignores)
     };
 
-    // Initial data for multi-threaded job
-    let mut initial_data : Vec<_> = Default::default();
-    let valid = ignore_tip.iter()
-        .map(|i| i.matched(&starting_dir, true).is_none())
-        .all(|b| b);
-
-    if valid {
-        initial_data.push((ignore_tip, starting_dir));
-    }
-
-    //let initial_ok = ignore_tip.iter()
-//        .map(|i| i.matched(&starting_dir, true))
-        //.all(|m| m.is_none());
-
-    // TODO: verify starting dir
-    //if ignore_tip.iter().map(|i| i.matched(&starting_dir, true))
-
-    //vec![(ignore_tip, starting_dir)];
-
-    //initial_data.push((ignore_tip, starting_dir));
+    // Initialize data
+    let initial_data = vec!((ignore_tip, starting_dir));
 
     // Run recursive jobs
     let ignored_paths : Vec<_> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
