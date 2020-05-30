@@ -11,7 +11,7 @@ homepage  = "https://github.com/forrestthewoods/fts_gamemath"
 repository  = "https://github.com/forrestthewoods/fts_gamemath"
 readme = "readme.md"
 keywords = ["gitignore", "ignore"]
-categories = ["cli", "command-line-utilities", "gitignore"]
+categories = ["command-line-utilities"]
 license = "Unlicense OR MIT"
 
 [dependencies]
