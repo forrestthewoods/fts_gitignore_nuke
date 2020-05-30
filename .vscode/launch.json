@@ -5,13 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug",
+            "name": "Debug (Windows)",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/fts_gitignore_nuke.exe",
-            "args": [],
+            "args": [
+                "--include_parent_ignores"
+            ],
             "stopAtEntry": false,
-            "cwd": "${workspaceRoot}",
+            "cwd": "${workspaceRoot}/target",
             "environment": [],
             "externalConsole": true
         },

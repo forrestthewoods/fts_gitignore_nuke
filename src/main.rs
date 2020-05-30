@@ -15,7 +15,6 @@ mod job_system;
 
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
-    let cpus_str = num_cpus::get_physical().to_string();
 
     // Parse cmdline args
     let matches = App::new("☢️ fts_gitignore_nuke ☢️")
@@ -37,19 +36,26 @@ fn main() -> anyhow::Result<()> {
             .short("t")
             .long("num_threads")
             .value_name("NUM_THREADS")
-            .help("Number of threads to use")
-            .default_value(&cpus_str))
+            .help("Number of threads to use"))
         .arg(Arg::with_name("benchmark")
             .short("b")
             .long("bench")
             .value_name("BENCHMARK")
             .help("Run benchmark. Auto-quit after walking directory")
-            .required(false)
             .takes_value(false))
         .arg(Arg::with_name("print_glob_matches")
             .long("print_glob_matches")
             .value_name("PRINT_GLOB_MATCHES")
-            .required(false)
+            .takes_value(false))
+        .arg(Arg::with_name("include_global_ignore")
+            .long("include_global_ignore")
+            .value_name("INCLUDE_GLOBAL_IGNORE")
+            .help("Include global .gitignore for matches")
+            .takes_value(false))
+        .arg(Arg::with_name("include_parent_ignores")
+            .long("include_parent_ignores")
+            .value_name("INCLUDE_PARENT_IGNORES")
+            .help("Include .gitignore files from parent directories")
             .takes_value(false))
         .arg(Arg::with_name("print_errors")
             .long("print_errors")
@@ -58,26 +64,44 @@ fn main() -> anyhow::Result<()> {
             .takes_value(false))
         .get_matches();
 
-    // Pull bools out of args
+    // Pull data out of args
+    let min_filesize_in_bytes : u64 = matches.value_of("min_file_size").unwrap().parse().unwrap();
+    let num_threads : usize = matches.value_of("num_threads").map_or_else(||num_cpus::get_physical(), |s| s.parse().unwrap());
     let benchmark_mode = matches.is_present("benchmark");
     let print_glob_matches = matches.is_present("print_glob_matches");
-    let print_errors = matches.is_present("print_errors");
+    let include_global_ignore = matches.is_present("include_global_ignore");
+    let include_parent_ignores = matches.is_present("include_parent_ignores");
+    let print_errors = matches.is_present("print_errors") && !benchmark_mode;
+    let empty_str : String = "".to_owned();
 
-    // Helper to print result if it's an error and print_errors is true
-    let check_error = |e: anyhow::Result<()>| { 
+    // Helpers to print Result error if print_errors is true
+    let check_error = |e: anyhow::Result<()>| {
         if print_errors {
             if let Err(e) = e {
                 println!("Error: [{:#}]", e);
             }
         }
     };
+
+    // Helper to generate a context string if print_errors is true
+    macro_rules! path_context {
+        ($func:expr, $path:expr) => ({
+            if print_errors {
+                format!("{} {}", $func, $path.display())
+            } else {
+                empty_str.clone()
+            }
+        })
+    }
+
     
+
     // Determine starting dir
     let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
         Some(path) => path.into(),
         None => env::current_dir()?
     };
-    
+
     // Verify starting dir is valid
     if !starting_dir.exists() {
         return Err(anyhow!("Directory [{:?}] does not exist", starting_dir));
@@ -88,38 +112,44 @@ fn main() -> anyhow::Result<()> {
 
     println!("🔍 scanning for targets from [{:?}]", starting_dir);
 
-    let min_filesize_in_bytes : u64 = matches.value_of("min_file_size").unwrap().parse().unwrap();
 
     // Start .gitignore stack with an empty root
     let ignore_stack = ImmutableStack::new();
     let mut ignore_tip = ignore_stack.clone();
     
     // Add global ignore (if exists)
-    let (global_ignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
-    if err.is_none() && global_ignore.num_ignores() > 0 {
-        ignore_tip = ignore_stack.push(global_ignore);
+    if include_global_ignore {
+        let (global_ignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
+        if err.is_none() && global_ignore.num_ignores() > 0 {
+            ignore_tip = ignore_stack.push(global_ignore);
+        }
     }
 
     // Search for ignores in parent directories
-    let mut parent_ignores : Vec<_>  = Default::default();
-    let mut dir : &std::path::Path = &starting_dir;
-    while let Some(parent_path) = dir.parent() {
-        let ignore_path = parent_path.join(".gitignore");
-        if ignore_path.exists() {
-            let mut ignore_builder = GitignoreBuilder::new(parent_path);
-            ignore_builder.add(ignore_path);
-            if let Ok(ignore) = ignore_builder.build() {
-                parent_ignores.push(ignore);
+    if include_parent_ignores {
+        let mut parent_ignores : Vec<_>  = Default::default();
+        let mut dir : &std::path::Path = &starting_dir;
+        while let Some(parent_path) = dir.parent() {
+            let ignore_path = parent_path.join(".gitignore");
+            println!("HACK [{}] [{}] [{}]", ignore_path.exists(), ignore_path.display(), parent_path.display());
+            if ignore_path.exists() {
+                let mut ignore_builder = GitignoreBuilder::new(parent_path);
+                ignore_builder.add(ignore_path);
+                if let Ok(ignore) = ignore_builder.build() {
+                    parent_ignores.push(ignore);
+                }
             }
+
+            dir = parent_path;
         }
 
-        dir = parent_path;
+        // Push parent ignores onto ignore_stack
+        for ignore in parent_ignores.into_iter().rev() {
+            ignore_tip = ignore_stack.push(ignore);
+        }
+
     }
 
-    // Push parent ignores onto ignore_stack
-    for ignore in parent_ignores.into_iter().rev() {
-        ignore_tip = ignore_stack.push(ignore);
-    }
 
     // Recursive job takes a path, checks if it's ignored, and recurses into subdirs if needed
     // Return value is result for the path only. Sub-directories will run separately
@@ -146,10 +176,10 @@ fn main() -> anyhow::Result<()> {
 
             let result = || -> anyhow::Result<()> {
                 let child_path = child
-                    .with_context(||format!("fs:read_dir {:?}", path.display()))?
+                    .with_context(|| path_context!("fs::read_dir", &path))?
                     .path();
                 let child_meta = std::fs::metadata(&child_path)
-                    .with_context(||format!("fs::metadata {:?}", child_path.display()))?;
+                    .with_context(|| path_context!("fs::metadata", &child_path))?;
     
                 // .gitignore is handled explicitly before loop
                 if child_meta.is_file() && child_path.file_name().unwrap() == ".gitignore" {
@@ -197,9 +227,26 @@ fn main() -> anyhow::Result<()> {
         Some(job_ignores)
     };
 
-    // Data for multi-threaded job
-    let num_threads : usize = matches.value_of("num_threads").unwrap().parse().unwrap();
-    let initial_data = vec![(ignore_tip, starting_dir)];
+    // Initial data for multi-threaded job
+    let mut initial_data : Vec<_> = Default::default();
+    let valid = ignore_tip.iter()
+        .map(|i| i.matched(&starting_dir, true).is_none())
+        .all(|b| b);
+
+    if valid {
+        initial_data.push((ignore_tip, starting_dir));
+    }
+
+    //let initial_ok = ignore_tip.iter()
+//        .map(|i| i.matched(&starting_dir, true))
+        //.all(|m| m.is_none());
+
+    // TODO: verify starting dir
+    //if ignore_tip.iter().map(|i| i.matched(&starting_dir, true))
+
+    //vec![(ignore_tip, starting_dir)];
+
+    //initial_data.push((ignore_tip, starting_dir));
 
     // Run recursive jobs
     let ignored_paths : Vec<_> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
@@ -228,10 +275,10 @@ fn main() -> anyhow::Result<()> {
             let result = || -> anyhow::Result<()> {
                 // Ignore errors
                 let child_path = child
-                    .with_context(||format!("fs::read_dir {:?}", path.display()))?
+                    .with_context(|| path_context!("read_dir", &path))?
                     .path();
                 let child_meta = fs::metadata(&child_path)
-                    .with_context(||format!("fs::metadata {:?}",child_path))?;
+                    .with_context(|| path_context!("fs::metadata", &child_path))?;
 
                 // Accumualte file size
                 // Add directories to the worker
@@ -306,22 +353,28 @@ fn main() -> anyhow::Result<()> {
     // Helper to remove either a file or a directory
     let remove_path = |path: &std::path::Path| {
 
+        // Try to remove path
         let result = || -> anyhow::Result<()> {
             let meta = fs::metadata(&path)
-                .with_context(||format!("fs::metadata {}", path.display()))?;
+                .with_context(|| format!("{} {}", "fs::metadata", path.display()))?;
             
             // Remove file or directory
             if meta.is_file() {
                 std::fs::remove_file(&path)
-                    .with_context(||format!("fs::remove_file {}", path.display()))?;
+                    .with_context(|| format!("{} {}", "fs::remove_file", path.display()))?;
             } else {
                 std::fs::remove_dir_all(&path)
-                    .with_context(||format!("fs::remove_dir_all {}", path.display()))?;
+                    .with_context(|| format!("{} {}", "fs::remove_dir_all", path.display()))?;
             }
 
             Ok(())
         }();
-        check_error(result);
+
+        // Always print removal errors 
+        match result {
+            Ok(_) => (),
+            Err(e) => println!("Error: {}", e)
+        }
     };
 
     // Loop to get confirmation to nuke data or quit
