@@ -3,6 +3,16 @@ name = "fts_gitignore_nuke"
 version = "0.1.0"
 authors = ["Forrest Smith <forrestthewoods@gmail.com>"]
 edition = "2018"
+description = """
+CLI tool to find files hidden by .gitignore files so they can be deleted.
+"""
+documentation = "https://github.com/forrestthewoods/fts_gitignore_nuke"
+homepage  = "https://github.com/forrestthewoods/fts_gamemath"
+repository  = "https://github.com/forrestthewoods/fts_gamemath"
+readme = "readme.md"
+keywords = ["gitignore", "ignore"]
+categories = ["cli", "tools", "gitignore"]
+license = "Unlicense OR MIT"
 
 [dependencies]
 anyhow = "1.0"

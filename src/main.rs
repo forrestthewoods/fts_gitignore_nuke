@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
         .arg(Arg::with_name("print_glob_matches")
             .long("print_glob_matches")
             .value_name("PRINT_GLOB_MATCHES")
+            .help("Prints which glob and which .gitignore matched each path")
             .takes_value(false))
         .arg(Arg::with_name("include_global_ignore")
             .long("include_global_ignore")
@@ -60,6 +61,7 @@ fn main() -> anyhow::Result<()> {
         .arg(Arg::with_name("print_errors")
             .long("print_errors")
             .value_name("PRINT_ERRORS")
+            .help("Prints errors if encountered")
             .required(false)
             .takes_value(false))
         .get_matches();
