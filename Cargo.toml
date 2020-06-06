@@ -1,6 +1,6 @@
 [package]
 name = "fts_gitignore_nuke"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Forrest Smith <forrestthewoods@gmail.com>"]
 edition = "2018"
 description = """

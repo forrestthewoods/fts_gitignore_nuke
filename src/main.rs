@@ -53,17 +53,16 @@ fn main() -> anyhow::Result<()> {
             .value_name("INCLUDE_GLOBAL_IGNORE")
             .help("Include global .gitignore for matches")
             .takes_value(false))
-        .arg(Arg::with_name("include_parent_ignores")
-            .long("include_parent_ignores")
-            .value_name("INCLUDE_PARENT_IGNORES")
-            .help("Include .gitignore files from parent directories")
-            .takes_value(false))
         .arg(Arg::with_name("print_errors")
             .long("print_errors")
             .value_name("PRINT_ERRORS")
             .help("Prints errors if encountered")
             .required(false)
             .takes_value(false))
+        .arg(Arg::with_name("root")
+            .short("r")
+            .long("root")
+            .help("Include .gitignores between root and files up to root"))
         .get_matches();
 
     // Pull data out of args
@@ -72,8 +71,8 @@ fn main() -> anyhow::Result<()> {
     let benchmark_mode = matches.is_present("benchmark");
     let print_glob_matches = matches.is_present("print_glob_matches");
     let include_global_ignore = matches.is_present("include_global_ignore");
-    let include_parent_ignores = matches.is_present("include_parent_ignores");
     let print_errors = matches.is_present("print_errors") && !benchmark_mode;
+    let root : Option<PathBuf> = matches.value_of_os("root").map(|s| s.into()).map(|s:PathBuf| std::fs::canonicalize(s).unwrap());
     let empty_str : String = "".to_owned();
 
     // Helpers to print Result error if print_errors is true
@@ -118,37 +117,52 @@ fn main() -> anyhow::Result<()> {
     // Start .gitignore stack with an empty root
     let ignore_stack = ImmutableStack::new();
     let mut ignore_tip = ignore_stack.clone();
-    
+
+    // TODO: White list
+    // !.git
+    // !.hg
+    // !(whitelist cmdline)
+
     // Add global ignore (if exists)
+    let mut global_ignore = ignore_tip.clone();
     if include_global_ignore {
-        let (global_ignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
-        if err.is_none() && global_ignore.num_ignores() > 0 {
-            ignore_tip = ignore_stack.push(global_ignore);
+        let (global_gitignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
+        if err.is_none() && global_gitignore.num_ignores() > 0 {
+            ignore_tip = ignore_stack.push(global_gitignore);
+            global_ignore = ignore_tip.clone();
         }
     }
 
     // Search for ignores in parent directories
-    if include_parent_ignores {
-        let mut parent_ignores : Vec<_>  = Default::default();
-        let mut dir : &std::path::Path = &starting_dir;
-        while let Some(parent_path) = dir.parent() {
-            let ignore_path = parent_path.join(".gitignore");
-            if ignore_path.exists() {
-                let mut ignore_builder = GitignoreBuilder::new(parent_path);
-                ignore_builder.add(ignore_path);
-                if let Ok(ignore) = ignore_builder.build() {
-                    parent_ignores.push(ignore);
-                }
+    // Stop if .git or .hg is present
+    let mut parent_ignores : Vec<_>  = Default::default();
+    let mut dir : &std::path::Path = &starting_dir;
+    while let Some(parent_path) = dir.parent() {
+        let ignore_path = parent_path.join(".gitignore");
+        if ignore_path.exists() {
+            let mut ignore_builder = GitignoreBuilder::new(parent_path);
+            ignore_builder.add(ignore_path);
+            if let Ok(ignore) = ignore_builder.build() {
+                parent_ignores.push(ignore);
             }
-
-            dir = parent_path;
         }
 
-        // Push parent ignores onto ignore_stack
-        for ignore in parent_ignores.into_iter().rev() {
-            ignore_tip = ignore_stack.push(ignore);
+        // Stop at source control roots
+        if parent_path.join(".git").exists() || parent_path.join(".hg").exists() {
+            break;
         }
 
+        // Stop at specified root
+        if root.is_some() && root.unwrap() == parent_path {
+            break;
+        }
+
+        dir = parent_path;
+    }
+
+    // Push parent ignores onto ignore_stack
+    for ignore in parent_ignores.into_iter().rev() {
+        ignore_tip = ignore_stack.push(ignore);
     }
 
 
@@ -161,6 +175,12 @@ fn main() -> anyhow::Result<()> {
 
         // Get iterator to directory children
         let read_dir = fs::read_dir(&path).ok()?;
+
+        // Check for source control root
+        if path.join(".git").exists() || path.join(".hg").exists() {
+            // Reset ignore tip
+            ignore_tip = global_ignore.clone();
+        }
 
         // Check for existing of gitignore
         let ignore_path = path.join(".gitignore");
@@ -181,8 +201,9 @@ fn main() -> anyhow::Result<()> {
                     .path();
                 let child_meta = std::fs::metadata(&child_path)
                     .with_context(|| path_context!("fs::metadata", &child_path))?;
-    
+
                 // .gitignore is handled explicitly before loop
+                // TODO: Not necessary?
                 if child_meta.is_file() && child_path.file_name().unwrap() == ".gitignore" {
                     return Ok(());
                 } 

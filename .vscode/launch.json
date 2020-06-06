@@ -10,7 +10,8 @@
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/fts_gitignore_nuke.exe",
             "args": [
-                "--include_parent_ignores"
+                "-d",
+                "c:/temp"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}/target",
