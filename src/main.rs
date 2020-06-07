@@ -96,6 +96,8 @@ fn main() -> anyhow::Result<()> {
         })
     }
 
+
+
     // Determine starting dir
     let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
         Some(path) => env::current_dir()?.join(path),
@@ -109,6 +111,8 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow!("[{:?}] is not a directory", starting_dir));
     }
     let starting_dir = std::fs::canonicalize(starting_dir)?;
+
+
 
     // Start .gitignore stack with an empty root
     let ignore_stack = ImmutableStack::new();
@@ -240,11 +244,15 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
 
+                // Child tested
                 Ok(())
             }();
+
+            // Print error if child could not be checked
             check_error(result);           
         }
         
+        // Return ignored paths for path
         Some(job_ignores)
     };
 
@@ -253,7 +261,7 @@ fn main() -> anyhow::Result<()> {
     let initial_data = vec!((ignore_tip, starting_dir));
 
     // Run recursive jobs
-    let ignored_paths : Vec<_> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
+    let ignored_paths : Vec<(usize, PathBuf)> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
         .into_iter()
         .flatten()
         .enumerate()
