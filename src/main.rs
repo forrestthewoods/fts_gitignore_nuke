@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context};
-use clap::{Arg, App};
 use crossbeam_deque::Worker;
 use ignore::{ gitignore::{Gitignore, GitignoreBuilder}};
 use itertools::Itertools;
@@ -7,78 +6,57 @@ use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
 use std::path::PathBuf;
 use std::time::Instant;
+use structopt::StructOpt;
 
 mod immutable_stack;
 use immutable_stack::ImmutableStack;
 
 mod job_system;
 
+#[derive(StructOpt, Debug)]
+#[structopt(
+    name = "☢️ fts_gitignore_nuke ☢️", 
+    author = "FTSmith <forrestthewoods@gmail.com>",
+    about = "Deletes files hidden by .gitignore files",
+)
+]
+struct Opts {
+    #[structopt(short, long, parse(from_os_str), help = "Root directory to start search")]
+    directory : Option<PathBuf>,
+
+    #[structopt(short, long, parse(from_os_str), help = "Include .gitignores between root and files up to root")]
+    root : Option<PathBuf>,
+
+    #[structopt(long, default_value="0", help="Minimum size, in bytes, to nuke")]
+    min_file_size: u64,
+
+    #[structopt(long, help="Number of threads to use. Default: num physical cores")]
+    num_threads : Option<usize>,
+
+    #[structopt(short, long, help="Auto-quit after walking directory")]
+    benchmark : bool,
+
+    #[structopt(long, help="Prints which glob and which .gitignore matched each path")]
+    print_glob_matches : bool,
+
+    #[structopt(long, help="Include global .gitignore for matches")]
+    include_global_ignore : bool,
+
+    #[structopt(long, help="Prints errors if encountered")]
+    print_errors : bool
+}
+
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
 
-    // Parse cmdline args
-    let matches = App::new("☢️ fts_gitignore_nuke ☢️")
-        .version(".1")
-        .author("Forrest S. <forrestthewoods@gmail.com>")
-        .about("Deletes files hidden by .gitignore files")
-        .arg(Arg::with_name("directory")
-            .short("d")
-            .long("directory")
-            .value_name("DIRECTORY")
-            .help("Root directory to start search"))
-        .arg(Arg::with_name("min_file_size")
-            .short("mfs")
-            .long("min_file_size")
-            .value_name("MIN_FILE_SIZE")
-            .help("Minimum size, in bytes, to nuke")
-            .default_value("0"))
-        .arg(Arg::with_name("num_threads")
-            .short("t")
-            .long("num_threads")
-            .value_name("NUM_THREADS")
-            .help("Number of threads to use"))
-        .arg(Arg::with_name("benchmark")
-            .short("b")
-            .long("bench")
-            .value_name("BENCHMARK")
-            .help("Run benchmark. Auto-quit after walking directory")
-            .takes_value(false))
-        .arg(Arg::with_name("print_glob_matches")
-            .long("print_glob_matches")
-            .value_name("PRINT_GLOB_MATCHES")
-            .help("Prints which glob and which .gitignore matched each path")
-            .takes_value(false))
-        .arg(Arg::with_name("include_global_ignore")
-            .long("include_global_ignore")
-            .value_name("INCLUDE_GLOBAL_IGNORE")
-            .help("Include global .gitignore for matches")
-            .takes_value(false))
-        .arg(Arg::with_name("print_errors")
-            .long("print_errors")
-            .value_name("PRINT_ERRORS")
-            .help("Prints errors if encountered")
-            .required(false)
-            .takes_value(false))
-        .arg(Arg::with_name("root")
-            .short("r")
-            .long("root")
-            .value_name("ROOT")
-            .help("Include .gitignores between root and files up to root"))
-        .get_matches();
-
-    // Pull data out of args
-    let min_filesize_in_bytes : u64 = matches.value_of("min_file_size").unwrap().parse().unwrap();
-    let num_threads : usize = matches.value_of("num_threads").map_or_else(||num_cpus::get_physical(), |s| s.parse().unwrap());
-    let benchmark_mode = matches.is_present("benchmark");
-    let print_glob_matches = matches.is_present("print_glob_matches");
-    let include_global_ignore = matches.is_present("include_global_ignore");
-    let print_errors = matches.is_present("print_errors") && !benchmark_mode;
-    let root : Option<PathBuf> = matches.value_of_os("root").map(|s| s.into()).map(|s:PathBuf| std::fs::canonicalize(s).unwrap());
-    let empty_str : String = "".to_owned();
+    // Parse args
+    let opt = Opts::from_args();
+    let num_threads : usize = opt.num_threads.unwrap_or_else(|| num_cpus::get_physical());
+    let root : Option<PathBuf> = opt.root.clone().map(|s| s.into()).map(|s:PathBuf| std::fs::canonicalize(s).unwrap());
 
     // Helpers to print Result error if print_errors is true
     let check_error = |e: anyhow::Result<()>| {
-        if print_errors {
+        if opt.print_errors {
             if let Err(e) = e {
                 println!("Error: [{:#}]", e);
             }
@@ -88,10 +66,10 @@ fn main() -> anyhow::Result<()> {
     // Helper to generate a context string if print_errors is true
     macro_rules! path_context {
         ($func:expr, $path:expr) => ({
-            if print_errors {
+            if opt.print_errors {
                 format!("{} {}", $func, $path.display())
             } else {
-                empty_str.clone()
+                "".to_owned()
             }
         })
     }
@@ -99,7 +77,7 @@ fn main() -> anyhow::Result<()> {
 
 
     // Determine starting dir
-    let starting_dir : std::path::PathBuf = match matches.value_of_os("directory") {
+    let starting_dir : std::path::PathBuf = match &opt.directory {
         Some(path) => env::current_dir()?.join(path),
         None => env::current_dir()?
     };
@@ -128,7 +106,7 @@ fn main() -> anyhow::Result<()> {
 
     // Add global ignore (if exists)
     let mut global_ignore = ignore_tip.clone();
-    if include_global_ignore {
+    if opt.include_global_ignore {
         println!("Adding global ignore");
         let (global_gitignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
         if err.is_none() && global_gitignore.num_ignores() > 0 {
@@ -216,14 +194,13 @@ fn main() -> anyhow::Result<()> {
                 let is_dir = child_meta.is_dir();
                 let ignore_match = ignore_tip.iter()
                     .map(|i| i.matched(&child_path, is_dir))
-                    .filter(|m| !m.is_none())
-                    .next();
+                    .find(|m| !m.is_none());
                 
                 // Handle ignored/whitelisted/neither
                 match ignore_match {
                     Some(m) => {
                         //  ignored or whitelisted
-                        if print_glob_matches {
+                        if opt.print_glob_matches {
                             let glob = m.inner().unwrap();
                             println!("Glob [{:?}] from Gitignore [{:?}] matched path [{:?}]",
                                 glob.original(), glob.from(), child_path);
@@ -322,7 +299,7 @@ fn main() -> anyhow::Result<()> {
     let final_ignore_paths : Vec<_> = ignored_paths.into_iter()
         .zip(ignore_path_sizes)
         .map(|((_,path), size)| (path, size))
-        .filter(|(_, size)| *size >= min_filesize_in_bytes)
+        .filter(|(_, size)| *size >= opt.min_file_size)
         .sorted_by_key(|kvp| kvp.1)
         .collect();
 
@@ -336,7 +313,7 @@ fn main() -> anyhow::Result<()> {
     let mut total_bytes = 0;
     for (path, bytes) in &final_ignore_paths {
         total_bytes += bytes;
-        if !benchmark_mode {
+        if !opt.benchmark {
             println!("  {:10} {:?}", pretty_bytes(*bytes), path);
         }
     }
@@ -344,7 +321,7 @@ fn main() -> anyhow::Result<()> {
     println!("Time: {:?}", start.elapsed());
     
     // Skip NUKE op in benchmark mode
-    if benchmark_mode {
+    if opt.benchmark {
         return Ok(());
     }
 

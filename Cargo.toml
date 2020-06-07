@@ -1,6 +1,6 @@
 [package]
 name = "fts_gitignore_nuke"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Forrest Smith <forrestthewoods@gmail.com>"]
 edition = "2018"
 description = """
@@ -16,14 +16,13 @@ license = "Unlicense OR MIT"
 
 [dependencies]
 anyhow = "1.0"
-clap = "2.33.1"
 crossbeam-deque = "0.7.3"
 crossbeam-utils = "0.7.2"
 ignore = "0.4.15"
 itertools = "0.9.0"
 num_cpus = "1.13.0"
 num-format = "0.4.0"
-walkdir = "2.3.1"
+structopt = "0.3.14"
 
 [profile.release]
 lto = false
