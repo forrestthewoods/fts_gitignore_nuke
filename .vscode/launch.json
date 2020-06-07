@@ -19,7 +19,6 @@
             "cwd": "${workspaceRoot}",
             "environment": [],
             "externalConsole": false,
-            
         },
     ]
 }
