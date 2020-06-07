@@ -11,12 +11,15 @@
             "program": "${workspaceRoot}/target/debug/fts_gitignore_nuke.exe",
             "args": [
                 "-d",
-                "c:/temp"
+                "target",
+                "-r",
+                "c:\\source_control"
             ],
             "stopAtEntry": false,
-            "cwd": "${workspaceRoot}/target",
+            "cwd": "${workspaceRoot}",
             "environment": [],
-            "externalConsole": true
+            "externalConsole": false,
+            
         },
     ]
 }
