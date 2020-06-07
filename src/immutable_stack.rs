@@ -62,3 +62,47 @@ impl<'a, T> Iterator for Iter<'a, T> {
         })
     }
 }
+
+#[test]
+fn simple_stack() {
+    let root = ImmutableStack::new();
+    let tip = root.push(1).push(2).push(3);
+    assert_eq!(tip.iter().cloned().collect::<Vec<_>>(), vec![3,2,1]);
+}
+
+#[test]
+fn split_stack() {
+    let tip = ImmutableStack::new()
+        .push(1)
+        .push(2)
+        .push(3);
+
+    let a = tip
+        .push(4)
+        .push(5);
+    let b = tip
+        .push(99)
+        .push(100);
+
+    assert_eq!(tip.iter().cloned().collect::<Vec<_>>(), vec![3,2,1]);
+    assert_eq!(a.iter().cloned().collect::<Vec<_>>(), vec![5,4,3,2,1]);
+    assert_eq!(b.iter().cloned().collect::<Vec<_>>(), vec![100,99,3,2,1]);
+}
+
+#[test]
+fn parallel_stack() {
+    let tip = ImmutableStack::new()
+        .push(1)
+        .push(2)
+        .push(3);
+
+    for i in 0..5 {
+        let tip_copy = tip.clone();
+        std::thread::spawn(move ||{
+            let thread_tip = tip_copy
+                .push(i)
+                .push(i*2);
+            assert_eq!(thread_tip.iter().cloned().collect::<Vec<_>>(), vec![i*2,i,3,2,1]);
+        });
+    }
+}
