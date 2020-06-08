@@ -168,6 +168,32 @@ fn bigger_recursive_job() {
         .map(|x| (x*(x+1)))
         .sum();
 
-    let result = run_recursive_job(data, job, 1);
+    let result = run_recursive_job(data, job, 6);
     assert_eq!(result.iter().sum::<i32>(), expected_result);
 }
+
+#[test]
+fn biggest_recursive_job() {
+    let n : u64 = 5000;
+    let data : Vec<_> = (0..n).collect();
+    let job = |x, worker: &Worker<_>| -> Option<u64> {
+        if x > 0 {
+            worker.push(x-1);
+            Some(x*2)
+        } else {
+            None
+        }
+    };
+
+    // ∑(1..n) = n(n+1)/2
+    // job code returns n*2 so drop /2
+    let expected_result : u64 = data.iter()
+        .map(|x| (x*(x+1))) 
+        .sum();
+
+    let result = run_recursive_job(data.clone(), job, 1);
+    assert_eq!(result.iter().sum::<u64>(), expected_result);
+
+    let result = run_recursive_job(data, job, 6);
+    assert_eq!(result.iter().sum::<u64>(), expected_result);
+} 
