@@ -63,7 +63,7 @@ where
                     }
 
                     // sleep
-                    backoff.spin();
+                    backoff.snooze();
                 }
 
                 worker_results
