@@ -16,7 +16,7 @@ mod job_system;
 #[derive(StructOpt, Debug)]
 #[structopt(
     name = "☢️ fts_gitignore_nuke ☢️", 
-    author = "FTSmith <forrestthewoods@gmail.com>",
+    author = "Forrest Smith <forrestthewoods@gmail.com>",
     about = "Deletes files hidden by .gitignore files",
 )
 ]
@@ -24,7 +24,7 @@ struct Opts {
     #[structopt(short, long, parse(from_os_str), help = "Root directory to start search")]
     directory : Option<PathBuf>,
 
-    #[structopt(short, long, parse(from_os_str), help = "Include .gitignores between root and files up to root")]
+    #[structopt(short, long, parse(from_os_str), help = "Include .gitignores between root and target directory")]
     root : Option<PathBuf>,
 
     #[structopt(long, default_value="0", help="Minimum size, in bytes, to nuke")]

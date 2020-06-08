@@ -18,22 +18,24 @@ Default behavior starts from the current directory and tests all children. `.git
 Default behavior does NOT include parent or `.gitignore` files. Both can be included with `--include_parent_ignores` and `--include_global_ignore` respectively.
 
 ```
+Deletes files hidden by .gitignore files
+
 USAGE:
     fts_gitignore_nuke.exe [FLAGS] [OPTIONS]
 
 FLAGS:
-    -b, --bench                     Run benchmark. Auto-quit after walking directory
-    -h, --help                      Prints help information
-        --include_global_ignore     Include global .gitignore for matches
-        --include_parent_ignores    Include .gitignore files from parent directories
-        --print_errors              Prints errors if encountered
-        --print_glob_matches        Prints which glob and which .gitignore matched each path
-    -V, --version                   Prints version information
+    -b, --benchmark                Auto-quit after walking directory
+    -h, --help                     Prints help information
+        --include-global-ignore    Include global .gitignore for matches
+        --print-errors             Prints errors if encountered
+        --print-glob-matches       Prints which glob and which .gitignore matched each path
+    -V, --version                  Prints version information
 
 OPTIONS:
-    -d, --directory <DIRECTORY>            Root directory to start search
-    -m, --min_file_size <MIN_FILE_SIZE>    Minimum size, in bytes, to nuke [default: 0]
-    -t, --num_threads <NUM_THREADS>        Number of threads to use
+    -d, --directory <directory>            Root directory to start search
+        --min-file-size <min-file-size>    Minimum size, in bytes, to nuke [default: 0]
+        --num-threads <num-threads>        Number of threads to use. Default: num physical cores
+    -r, --root <root>                      Include .gitignores between root and target directory
 ```
 
 # Support
