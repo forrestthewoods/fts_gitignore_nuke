@@ -66,6 +66,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cactus"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf034765b7d19a011c6d619e880582bf95e8186b580e6fab56589872dd87dcf5"
+
+[[package]]
 name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,9 +143,10 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "fts_gitignore_nuke"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
+ "cactus",
  "crossbeam-deque",
  "crossbeam-utils",
  "ignore",

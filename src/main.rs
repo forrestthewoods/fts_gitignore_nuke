@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context};
+use cactus::ArcCactus;
 use crossbeam_deque::Worker;
 use ignore::{ gitignore::{Gitignore, GitignoreBuilder}};
 use itertools::Itertools;
@@ -8,8 +9,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 use structopt::StructOpt;
 
-mod immutable_stack;
-use immutable_stack::ImmutableStack;
+//mod immutable_stack;
+//use immutable_stack::ImmutableStack;
 
 mod job_system;
 
@@ -93,7 +94,7 @@ fn main() -> anyhow::Result<()> {
 
 
     // Start .gitignore stack with an empty root
-    let ignore_stack = ImmutableStack::new();
+    let ignore_stack = ArcCactus::new();
     let mut ignore_tip = ignore_stack.clone();
 
     // Add whitelist to stack
@@ -102,7 +103,7 @@ fn main() -> anyhow::Result<()> {
         .add_line(None, "!.hg").unwrap()
         // TODO: cmdline whitelist?
         .build().unwrap();
-    ignore_tip = ignore_tip.push(ignore_whitelist);
+    ignore_tip = ignore_tip.child(ignore_whitelist);
 
     // Add global ignore (if exists)
     let mut global_ignore = ignore_tip.clone();
@@ -110,7 +111,7 @@ fn main() -> anyhow::Result<()> {
         println!("Adding global ignore");
         let (global_gitignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
         if err.is_none() && global_gitignore.num_ignores() > 0 {
-            ignore_tip = ignore_stack.push(global_gitignore);
+            ignore_tip = ignore_stack.child(global_gitignore);
             global_ignore = ignore_tip.clone();
         }
     }
@@ -148,7 +149,7 @@ fn main() -> anyhow::Result<()> {
 
         // Push parent ignores onto ignore_stack
         for ignore in parent_ignores.into_iter().rev() {
-            ignore_tip = ignore_stack.push(ignore);
+            ignore_tip = ignore_stack.child(ignore);
         }
     }
 
@@ -156,7 +157,7 @@ fn main() -> anyhow::Result<()> {
     // Recursive job takes a path, checks if it's ignored, and recurses into subdirs if needed
     // Return value is result for the path only. Sub-directories will run separately
     // and return their own result.
-    let recursive_job = |(mut ignore_tip, path): (ImmutableStack<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
+    let recursive_job = |(mut ignore_tip, path): (ArcCactus<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
         
         let mut job_ignores : Vec<_> = Default::default();
 
@@ -175,7 +176,7 @@ fn main() -> anyhow::Result<()> {
             let mut ignore_builder = GitignoreBuilder::new(&path);
             ignore_builder.add(ignore_path);
             if let Ok(ignore) = ignore_builder.build() {
-                ignore_tip = ignore_tip.push(ignore);
+                ignore_tip = ignore_tip.child(ignore);
             }
         }
 
@@ -192,7 +193,7 @@ fn main() -> anyhow::Result<()> {
                 // Test if child_path is ignored, whitelisted, or neither
                 // Return first match that is either ignored or whitelisted
                 let is_dir = child_meta.is_dir();
-                let ignore_match = ignore_tip.iter()
+                let ignore_match = ignore_tip.vals()
                     .map(|i| i.matched(&child_path, is_dir))
                     .find(|m| !m.is_none());
                 

@@ -16,6 +16,7 @@ license = "Unlicense OR MIT"
 
 [dependencies]
 anyhow = "1.0"
+cactus = "1.0.6"
 crossbeam-deque = "0.7.3"
 crossbeam-utils = "0.7.2"
 ignore = "0.4.15"
