@@ -9,9 +9,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 use structopt::StructOpt;
 
-//mod immutable_stack;
-//use immutable_stack::ImmutableStack;
-
 mod job_system;
 
 #[derive(StructOpt, Debug)]
