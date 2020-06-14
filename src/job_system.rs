@@ -200,26 +200,19 @@ mod tests {
 
     #[test]
     fn single_threaded_stress() {
-        let start = std::time::Instant::now();
         let data : Vec<_> = (0..6000).collect();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 1));
-        println!("Elapsed: {:?}", start.elapsed());
     }
 
     #[test]
     fn multi_threaded_stress() {
-        let start = std::time::Instant::now();
         let data : Vec<_> = (0..10000).collect();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
-        println!("Elapsed: {:?}", start.elapsed());
     }
 
     #[test]
     fn multi_threaded_steal_stress() {
         let data = vec![1, 1, 1, 1, 1, 10_000_000];
-
-        let start = std::time::Instant::now();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
-        println!("Elapsed: {:?}", start.elapsed());
     }
 }
