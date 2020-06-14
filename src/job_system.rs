@@ -209,10 +209,4 @@ mod tests {
         let data : Vec<_> = (0..10000).collect();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
     }
-
-    #[test]
-    fn multi_threaded_steal_stress() {
-        let data = vec![1, 1, 1, 1, 1, 10_000_000];
-        assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
-    }
 }
