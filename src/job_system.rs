@@ -213,4 +213,13 @@ mod tests {
         assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
         println!("Elapsed: {:?}", start.elapsed());
     }
+
+    #[test]
+    fn multi_threaded_steal_stress() {
+        let data = vec![1, 1, 1, 1, 1, 10_000_000];
+
+        let start = std::time::Instant::now();
+        assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
+        println!("Elapsed: {:?}", start.elapsed());
+    }
 }
