@@ -136,64 +136,81 @@ impl Drop for ActiveToken {
     }
 }
 
-#[test]
-fn basic_recursive_job() {
-    let data = vec![3];
-    let job = |x, worker: &Worker<_>| -> Option<i32> {
-        if x > 0 {
-            worker.push(x-1);
-            Some(x*2)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(value: i64, worker:&Worker<i64>) -> Option<i64> {
+        if value > 0 {
+            worker.push(value-1);
+            Some(value)
         } else {
             None
         }
-    };
+    }
 
-    let result = run_recursive_job(data, job, 1);
-    assert_eq!(result, vec![6,4,2]);
+    fn instant_sum(value: i64) -> i64 {
+        (value*(value+1)) / 2
+    }
+
+    fn instant_sums(values: &[i64]) -> i64 {
+        values.iter().map(|v| instant_sum(*v)).sum()
+    }
+
+    fn recursive_sum(value: i64, num_threads: usize) -> i64 {
+        let data = vec![value];
+        let results = run_recursive_job(data, job, num_threads);
+        results.iter().sum()
+    }
+
+    fn recursive_sums(values: &[i64], num_threads: usize) -> i64 {
+        let data : Vec<_> = values.iter().cloned().collect();
+        let results = run_recursive_job(data, job, num_threads);
+        results.iter().sum()
+    }
+
+    #[test]
+    fn single_threaded_sum() {
+        assert_eq!(instant_sum(10), recursive_sum(10, 1));
+        assert_eq!(instant_sum(100), recursive_sum(100, 1));
+        assert_eq!(instant_sum(1000), recursive_sum(1000, 1));
+        assert_eq!(instant_sum(10000), recursive_sum(10000, 1));
+    }
+
+    #[test]
+    fn single_threaded_sums() {
+        let data = vec![10, 100, 1000, 10000];
+        assert_eq!(instant_sums(&data), recursive_sums(&data, 1));
+    }
+
+    #[test]
+    fn multi_threaded_sum() {
+        assert_eq!(instant_sum(10), recursive_sum(10, 6));
+        assert_eq!(instant_sum(100), recursive_sum(100, 6));
+        assert_eq!(instant_sum(1000), recursive_sum(1000, 6));
+        assert_eq!(instant_sum(10000), recursive_sum(10000, 6));
+    }
+
+    #[test]
+    fn multi_threaded_sums() {
+        let data = vec![10, 100, 1000, 10000];
+        assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
+    }
+
+    #[test]
+    fn single_threaded_stress() {
+        let start = std::time::Instant::now();
+        let data : Vec<_> = (0..6000).collect();
+        assert_eq!(instant_sums(&data), recursive_sums(&data, 1));
+        println!("Elapsed: {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn multi_threaded_stress() {
+        let start = std::time::Instant::now();
+        let data : Vec<_> = (0..10000).collect();
+        assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
+        println!("Elapsed: {:?}", start.elapsed());
+    }
 }
-
-#[test]
-fn bigger_recursive_job() {
-    let data = vec![1,2,3,4,5,6,7,8,9,10];
-    let job = |x, worker: &Worker<_>| -> Option<i32> {
-        if x > 0 {
-            worker.push(x-1);
-            Some(x*2)
-        } else {
-            None
-        }
-    };
-
-    let expected_result : i32 = data.iter()
-        .map(|x| (x*(x+1)))
-        .sum();
-
-    let result = run_recursive_job(data, job, 6);
-    assert_eq!(result.iter().sum::<i32>(), expected_result);
-}
-
-#[test]
-fn biggest_recursive_job() {
-    let n : u64 = 5000;
-    let data : Vec<_> = (0..n).collect();
-    let job = |x, worker: &Worker<_>| -> Option<u64> {
-        if x > 0 {
-            worker.push(x-1);
-            Some(x*2)
-        } else {
-            None
-        }
-    };
-
-    // ∑(1..n) = n(n+1)/2
-    // job code returns n*2 so drop /2
-    let expected_result : u64 = data.iter()
-        .map(|x| (x*(x+1))) 
-        .sum();
-
-    let result = run_recursive_job(data.clone(), job, 1);
-    assert_eq!(result.iter().sum::<u64>(), expected_result);
-
-    let result = run_recursive_job(data, job, 6);
-    assert_eq!(result.iter().sum::<u64>(), expected_result);
-} 
