@@ -97,8 +97,14 @@ fn main() -> anyhow::Result<()> {
 
     // Add whitelist to stack
     let ignore_whitelist = GitignoreBuilder::new(starting_dir.clone())
-        .add_line(None, "!.git").unwrap()
-        .add_line(None, "!.hg").unwrap()
+        // These are useless because their precedence is lower than patterns loaded later
+        // If a .gitignore specifies to exclude `.git`, then `.git` will be deleted.
+        // Instead, these should be either manually checked or added
+        // to the stack later to have a higher precedence
+        // .add_line(None, "!.git").unwrap()
+        // .add_line(None, "!.hg").unwrap()
+        // .add_line(None, "!.gitignore").unwrap()
+        // .add_line(None, "!.gitnuke").unwrap()
         // TODO: cmdline whitelist?
         .build().unwrap();
     ignore_tip = ignore_tip.child(ignore_whitelist);
@@ -319,6 +325,7 @@ fn main() -> anyhow::Result<()> {
         .zip(ignore_path_sizes)
         .map(|((_,path), size)| (path, size))
         .filter(|(_, size)| *size >= opt.min_file_size)
+        .filter(|(path, _)| exclude_global_whitelist(&path))
         .sorted_by_key(|kvp| kvp.1)
         .collect();
 
@@ -427,5 +434,20 @@ fn pretty_bytes(orig_amount: u64) -> String {
         7 => format!("{} Zetta", amount),
         8 => format!("{} Yotta", amount),
         _ => format!("{}", orig_amount)
+    }
+}
+
+// Return true iff the file is not part of the global whitelist
+fn exclude_global_whitelist(path: &PathBuf) -> bool {
+    if let Some(fname) = path.file_name() {
+        match fname.to_str() {
+            Some(".git")
+            | Some(".hg")
+            | Some(".gitignore")
+            | Some(".gitnuke") => false,
+            _ => true,
+        }
+    } else {
+        true
     }
 }
