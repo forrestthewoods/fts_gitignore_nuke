@@ -15,7 +15,8 @@ mod job_system;
 #[structopt(
     name = "☢️ fts_gitignore_nuke ☢️",
     author = "Forrest Smith <forrestthewoods@gmail.com>",
-    about = "Deletes files hidden by .gitignore files",
+    about = "Deletes files hidden by .gitignore files.
+If a .gitnuke is found its patterns will be used with higher precedence that any .gitignore from the same directory.",
 )
 ]
 struct Opts {
@@ -119,12 +120,23 @@ fn main() -> anyhow::Result<()> {
         let mut parent_ignores : Vec<_>  = Default::default();
         let mut dir : &std::path::Path = &starting_dir;
         while let Some(parent_path) = dir.parent() {
+            // Push `.gitignore` patterns
             let ignore_path = parent_path.join(".gitignore");
             if ignore_path.exists() {
                 let mut ignore_builder = GitignoreBuilder::new(parent_path);
                 ignore_builder.add(ignore_path.clone());
                 if let Ok(ignore) = ignore_builder.build() {
                     println!("Adding: [{}]", ignore_path.display());
+                    parent_ignores.push(ignore);
+                }
+            }
+            // Push `.gitnuke` patterns (higher priority than `.gitignore`)
+            let preserve_path = parent_path.join(".gitnuke");
+            if preserve_path.exists() {
+                let mut ignore_builder = GitignoreBuilder::new(parent_path);
+                ignore_builder.add(preserve_path.clone());
+                if let Ok(ignore) = ignore_builder.build() {
+                    println!("Adding: [{}]", preserve_path.display());
                     parent_ignores.push(ignore);
                 }
             }
@@ -167,11 +179,20 @@ fn main() -> anyhow::Result<()> {
             ignore_tip = global_ignore.clone();
         }
 
-        // Check for existing of gitignore
+        // Add `.gitignore` patterns
         let ignore_path = path.join(".gitignore");
         if ignore_path.exists() {
             let mut ignore_builder = GitignoreBuilder::new(&path);
             ignore_builder.add(ignore_path);
+            if let Ok(ignore) = ignore_builder.build() {
+                ignore_tip = ignore_tip.child(ignore);
+            }
+        }
+        // Add `.gitnuke` patterns
+        let preserve_path = path.join(".gitnuke");
+        if preserve_path.exists() {
+            let mut ignore_builder = GitignoreBuilder::new(&path);
+            ignore_builder.add(preserve_path);
             if let Ok(ignore) = ignore_builder.build() {
                 ignore_tip = ignore_tip.child(ignore);
             }
