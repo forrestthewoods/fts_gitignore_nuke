@@ -2,12 +2,12 @@ use crossbeam_deque::{Injector, Stealer, Worker};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub fn run_recursive_job<IN,OUT,JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT> 
-where 
+pub fn run_recursive_job<IN,OUT,JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT>
+where
     IN: Send,
     OUT: Send,
     JOB: Fn(IN, &Worker<IN>) -> Option<OUT> + Clone + Send,
-{   
+{
     // Create crossbeam_deque injector/worker/stealers
     let injector = Injector::new();
     let workers : Vec<_> = (0..num_workers).map(|_| Worker::new_lifo()).collect();
@@ -21,13 +21,13 @@ where
 
     // Create single scope to contain all workers
     let result : Vec<OUT> = crossbeam_utils::thread::scope(|scope|
-    {   
+    {
         // Container for all workers
         let mut worker_scopes : Vec<_> = Default::default();
 
         // Create each worker
         for worker in workers.into_iter() {
-            
+
             // Make copy of data so we can move clones or references into closure
             let injector_borrow = &injector;
             let stealers_copy = stealers.clone();
@@ -54,7 +54,7 @@ where
                             if let Some(result) = job_copy(item, &worker) {
                                 worker_results.push(result);
                             }
-                        } 
+                        }
                     }
 
                     // no work, check if all workers are idle
@@ -188,7 +188,7 @@ fn biggest_recursive_job() {
     // ∑(1..n) = n(n+1)/2
     // job code returns n*2 so drop /2
     let expected_result : u64 = data.iter()
-        .map(|x| (x*(x+1))) 
+        .map(|x| (x*(x+1)))
         .sum();
 
     let result = run_recursive_job(data.clone(), job, 1);
@@ -196,4 +196,4 @@ fn biggest_recursive_job() {
 
     let result = run_recursive_job(data, job, 6);
     assert_eq!(result.iter().sum::<u64>(), expected_result);
-} 
+}

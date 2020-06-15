@@ -13,7 +13,7 @@ mod job_system;
 
 #[derive(StructOpt, Debug)]
 #[structopt(
-    name = "☢️ fts_gitignore_nuke ☢️", 
+    name = "☢️ fts_gitignore_nuke ☢️",
     author = "Forrest Smith <forrestthewoods@gmail.com>",
     about = "Deletes files hidden by .gitignore files",
 )
@@ -155,7 +155,7 @@ fn main() -> anyhow::Result<()> {
     // Return value is result for the path only. Sub-directories will run separately
     // and return their own result.
     let recursive_job = |(mut ignore_tip, path): (ArcCactus<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
-        
+
         let mut job_ignores : Vec<_> = Default::default();
 
         // Get iterator to directory children
@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
                 let ignore_match = ignore_tip.vals()
                     .map(|i| i.matched(&child_path, is_dir))
                     .find(|m| !m.is_none());
-                
+
                 // Handle ignored/whitelisted/neither
                 match ignore_match {
                     Some(m) => {
@@ -203,7 +203,7 @@ fn main() -> anyhow::Result<()> {
                             println!("Glob [{:?}] from Gitignore [{:?}] matched path [{:?}]",
                                 glob.original(), glob.from(), child_path);
                         }
-    
+
                         // Add ignores to the list. Do nothing if whitelisted
                         if m.is_ignore() {
                             job_ignores.push(child_path);
@@ -224,9 +224,9 @@ fn main() -> anyhow::Result<()> {
             }();
 
             // Print error if child could not be checked
-            check_error(result);           
+            check_error(result);
         }
-        
+
         // Return ignored paths for path
         Some(job_ignores)
     };
@@ -241,7 +241,7 @@ fn main() -> anyhow::Result<()> {
         .flatten()
         .enumerate()
         .collect();
-    
+
     // Second recursive job to compute size of ignored directories
     let recursive_dir_size_job = |(root_idx, path): (usize, PathBuf), worker: &Worker<_>| -> Option<(usize, u64)> {
         // Get type of path
@@ -279,7 +279,7 @@ fn main() -> anyhow::Result<()> {
             }();
             check_error(result);
         }
-        
+
         Some((root_idx, files_size))
     };
 
@@ -317,7 +317,7 @@ fn main() -> anyhow::Result<()> {
     }
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
     println!("Time: {:?}", start.elapsed());
-    
+
     // Skip NUKE op in benchmark mode
     if opt.benchmark {
         return Ok(());
@@ -334,7 +334,7 @@ fn main() -> anyhow::Result<()> {
         let result = || -> anyhow::Result<()> {
             let meta = fs::metadata(&path)
                 .with_context(|| format!("{} {}", "fs::metadata", path.display()))?;
-            
+
             // Remove file or directory
             if meta.is_file() {
                 std::fs::remove_file(&path)
@@ -347,7 +347,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }();
 
-        // Always print removal errors 
+        // Always print removal errors
         match result {
             Ok(_) => (),
             Err(e) => println!("Error: {}", e)
@@ -372,7 +372,7 @@ fn main() -> anyhow::Result<()> {
 
             println!("☠️☠️☠️ nuclear deletion complete ☠️☠️☠️");
             break;
-        } 
+        }
         else if trimmed_input.eq_ignore_ascii_case(QUIT_STRING) {
             println!("😇😇😇 Nuclear launch aborted. Thank you and have a nice day. 😇😇😇");
             break;
