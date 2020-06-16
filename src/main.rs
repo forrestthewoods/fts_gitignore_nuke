@@ -16,7 +16,7 @@ mod job_system;
     name = "☢️ fts_gitignore_nuke ☢️",
     author = "Forrest Smith <forrestthewoods@gmail.com>",
     about = "Deletes files hidden by .gitignore files.
-If a .gitnuke is found its patterns will be used with higher precedence that any .gitignore from the same directory.",
+If a .gitnuke is found its patterns will be used with higher precedence than any .gitignore from the same directory.",
 )
 ]
 struct Opts {
