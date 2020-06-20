@@ -2,7 +2,7 @@
 
 fts_gitignore_nuke is a Rust-written CLI tool to find files and folders hidden by .gitignore files so they can be deleted.
 
-This is useful because it allows deleting build output from many projects in one action. All operations are performed manually and `git` is never invoked. This is because `.gitignore` files are increasingly used in contexts outside Git. For example Mercurial, Perforce or custom tooling may leverage `.gitignore` files.
+This is useful because it allows deleting build output from many projects in one action. All operations are performed manually and `git` is never invoked. This is because `.gitignore` files are increasingly used in contexts outside Git. For example Mercurial, perforce or custom tooling may leverage `.gitignore` files.
 
 ![](/screenshots/nuclear_launch.png?raw=true)
 
@@ -40,8 +40,54 @@ OPTIONS:
 
 # Support
 
-`fts_gitignore_nuke` was built for Windows. It should work on other platforms, but has not been tested. This tool was written for personal use cases and may require slight modification to support different environments or workflows. Pull requests welcome!
+`fts_gitignore_nuke` was built for Windows. It has also been tested on Ubuntu, and should support other platforms. This tool was written for personal use cases and may require slight modification to support different environments or workflows. Pull requests welcome!
 
 # Performance
 
 `fts_gitignore_nuke` is relatively fast and multithreaded by default. Disk IO is the clear bottleneck.
+
+
+# How to prevent critical files from being deleted ?
+
+After loading `.gitignore`, `fts_gitignore_nuke` will also look for `.gitnuke`. Any pattern included or excluded from `.gitnuke` has higher precedence than whatever is in `.gitignore`.
+
+Additionally, `fts_gitignore_nuke` will NEVER delete any of the following:
+* `.git`
+* `.hg`
+* `.gitignore`
+* `.gitnuke`
+
+You may safely add any of these patterns to your `.gitignore` (or even `.gitnuke`), the corresponding items will not be removed.
+
+As an example, the three following patterns are absolutely equivalent, and will result in the same files being deleted regardless of the layout of the directory tree.
+
+```
+.gitignore
+    foo/*
+    bar
+    baz/quux
+```
+```
+.gitignore
+    foo/*
+
+.gitnuke
+    bar
+    baz/quux
+    .gitignore
+```
+```
+.gitignore
+    foo/*
+    bar
+    baz/quux
+    spam
+    eggs/*
+    .gitnuke
+
+.gitnuke
+    !spam
+    !eggs/*
+```
+
+Despite this mechanism, you should still carefully review the list of files to be deleted before nuking them.
