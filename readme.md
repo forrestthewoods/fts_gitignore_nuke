@@ -47,47 +47,10 @@ OPTIONS:
 `fts_gitignore_nuke` is relatively fast and multithreaded by default. Disk IO is the clear bottleneck.
 
 
-# How to prevent critical files from being deleted ?
+# How to prevent critical files from being deleted?
 
-After loading `.gitignore`, `fts_gitignore_nuke` will also look for `.gitnuke`. Any pattern included or excluded from `.gitnuke` has higher precedence than whatever is in `.gitignore`.
+In addition to `.gitignore` files, `fts_gitignore_nuke` will also look for `.gitnuke` files. A `.gitnuke` file is loaded exactly as a regular `.gitignore` behavior. Expected user behavior is for `.gitnuke` files to contain whitelist patterns (example: `!foo.key`) for files and folders that are not part of a Git repo but should not be nuked. Examples of such content are private keys, local content, or expensive build artifacts.
 
-Additionally, `fts_gitignore_nuke` will NEVER delete any of the following:
-* `.git`
-* `.hg`
-* `.gitignore`
-* `.gitnuke`
+When matching a path `fts_gitignore_nuke` will run through all hierarchical `.gitnuke` files and then all `.gitignore` files. This means that every `.gitnuke` file has higher precedence than every `.gitignore` file.
 
-You may safely add any of these patterns to your `.gitignore` (or even `.gitnuke`), the corresponding items will not be removed.
-
-As an example, the three following patterns are absolutely equivalent, and will result in the same files being deleted regardless of the layout of the directory tree.
-
-```
-.gitignore
-    foo/*
-    bar
-    baz/quux
-```
-```
-.gitignore
-    foo/*
-
-.gitnuke
-    bar
-    baz/quux
-    .gitignore
-```
-```
-.gitignore
-    foo/*
-    bar
-    baz/quux
-    spam
-    eggs/*
-    .gitnuke
-
-.gitnuke
-    !spam
-    !eggs/*
-```
-
-Despite this mechanism, you should still carefully review the list of files to be deleted before nuking them.
+As always, please carefully review the list of files to be deleted before nuking them.
