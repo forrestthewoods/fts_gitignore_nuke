@@ -1,17 +1,17 @@
 use crossbeam_deque::{Injector, Stealer, Worker};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-pub fn run_recursive_job<IN,OUT,JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT> 
-where 
+pub fn run_recursive_job<IN, OUT, JOB>(initial: Vec<IN>, job: JOB, num_workers: usize) -> Vec<OUT>
+where
     IN: Send,
     OUT: Send,
     JOB: Fn(IN, &Worker<IN>) -> Option<OUT> + Clone + Send,
-{   
+{
     // Create crossbeam_deque injector/worker/stealers
     let injector = Injector::new();
-    let workers : Vec<_> = (0..num_workers).map(|_| Worker::new_lifo()).collect();
-    let stealers : Vec<_> = workers.iter().map(|w| w.stealer()).collect();
+    let workers: Vec<_> = (0..num_workers).map(|_| Worker::new_lifo()).collect();
+    let stealers: Vec<_> = workers.iter().map(|w| w.stealer()).collect();
     let active_counter = ActiveCounter::new();
 
     // Seed injector with initial data
@@ -20,14 +20,12 @@ where
     }
 
     // Create single scope to contain all workers
-    let result : Vec<OUT> = crossbeam_utils::thread::scope(|scope|
-    {   
+    let result: Vec<OUT> = crossbeam_utils::thread::scope(|scope| {
         // Container for all workers
-        let mut worker_scopes : Vec<_> = Default::default();
+        let mut worker_scopes: Vec<_> = Default::default();
 
         // Create each worker
         for worker in workers.into_iter() {
-            
             // Make copy of data so we can move clones or references into closure
             let injector_borrow = &injector;
             let stealers_copy = stealers.clone();
@@ -37,7 +35,7 @@ where
             // Create scope for single worker
             let s = scope.spawn(move |_| {
                 // results of this worker
-                let mut worker_results : Vec<_> = Default::default();
+                let mut worker_results: Vec<_> = Default::default();
 
                 // backoff spinner for sleeping
                 let backoff = crossbeam_utils::Backoff::new();
@@ -54,7 +52,7 @@ where
                             if let Some(result) = job_copy(item, &worker) {
                                 worker_results.push(result);
                             }
-                        } 
+                        }
                     }
 
                     // no work, check if all workers are idle
@@ -73,26 +71,25 @@ where
         }
 
         // run all workers to completion and combine their results
-        worker_scopes.into_iter()
+        worker_scopes
+            .into_iter()
             .filter_map(|s| s.join().ok())
             .flatten()
             .collect()
-    }).unwrap();
+    })
+    .unwrap();
 
     result
 }
 
-fn find_task<T>(
-    local: &Worker<T>,
-    global: &Injector<T>,
-    stealers: &[Stealer<T>],
-) -> Option<T> {
+fn find_task<T>(local: &Worker<T>, global: &Injector<T>, stealers: &[Stealer<T>]) -> Option<T> {
     // Pop a task from the local queue, if not empty.
     local.pop().or_else(|| {
         // Otherwise, we need to look for a task elsewhere.
         std::iter::repeat_with(|| {
             // Try stealing a batch of tasks from the global queue.
-            global.steal_batch_and_pop(local)
+            global
+                .steal_batch_and_pop(local)
                 // Or try stealing a task from one of the other threads.
                 .or_else(|| stealers.iter().map(|s| s.steal()).collect())
         })
@@ -103,22 +100,24 @@ fn find_task<T>(
     })
 }
 
-
-
 // Helpers to track when all workers are done
 #[derive(Clone)]
 struct ActiveCounter {
-    active_count: Arc<AtomicUsize>
+    active_count: Arc<AtomicUsize>,
 }
 
 impl ActiveCounter {
     pub fn take_token(&mut self) -> ActiveToken {
         self.active_count.fetch_add(1, Ordering::SeqCst);
-        ActiveToken { active_count: self.active_count.clone() }
+        ActiveToken {
+            active_count: self.active_count.clone(),
+        }
     }
 
     pub fn new() -> ActiveCounter {
-        ActiveCounter { active_count: Arc::new(AtomicUsize::new(0)) }
+        ActiveCounter {
+            active_count: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     pub fn is_zero(&self) -> bool {
@@ -127,7 +126,7 @@ impl ActiveCounter {
 }
 
 struct ActiveToken {
-    active_count: Arc<AtomicUsize>
+    active_count: Arc<AtomicUsize>,
 }
 
 impl Drop for ActiveToken {
@@ -136,14 +135,13 @@ impl Drop for ActiveToken {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn job(value: i64, worker:&Worker<i64>) -> Option<i64> {
+    fn job(value: i64, worker: &Worker<i64>) -> Option<i64> {
         if value > 0 {
-            worker.push(value-1);
+            worker.push(value - 1);
             Some(value)
         } else {
             None
@@ -151,7 +149,7 @@ mod tests {
     }
 
     fn instant_sum(value: i64) -> i64 {
-        (value*(value+1)) / 2
+        (value * (value + 1)) / 2
     }
 
     fn instant_sums(values: &[i64]) -> i64 {
@@ -165,7 +163,7 @@ mod tests {
     }
 
     fn recursive_sums(values: &[i64], num_threads: usize) -> i64 {
-        let data : Vec<_> = values.iter().cloned().collect();
+        let data: Vec<_> = values.iter().cloned().collect();
         let results = run_recursive_job(data, job, num_threads);
         results.iter().sum()
     }
@@ -200,13 +198,13 @@ mod tests {
 
     #[test]
     fn single_threaded_stress() {
-        let data : Vec<_> = (0..6000).collect();
+        let data: Vec<_> = (0..6000).collect();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 1));
     }
 
     #[test]
     fn multi_threaded_stress() {
-        let data : Vec<_> = (0..10000).collect();
+        let data: Vec<_> = (0..10000).collect();
         assert_eq!(instant_sums(&data), recursive_sums(&data, 6));
     }
 }
