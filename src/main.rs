@@ -122,8 +122,7 @@ fn main() -> anyhow::Result<()> {
         .add_line(None, "!.gitignore")?
         .add_line(None, "!.gitnuke")?
         // TODO: cmdline whitelist?
-        .build()
-        .unwrap();
+        .build()?;
     gitnuke_tip = gitnuke_tip.child(ignore_whitelist);
 
     // Add global ignore (if requested)
