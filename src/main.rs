@@ -117,14 +117,10 @@ fn main() -> anyhow::Result<()> {
 
     // Add whitelist to gitnuke stack
     let ignore_whitelist = GitignoreBuilder::new(starting_dir.clone())
-        .add_line(None, "!.git")
-        .unwrap()
-        .add_line(None, "!.hg")
-        .unwrap()
-        .add_line(None, "!.gitignore")
-        .unwrap()
-        .add_line(None, "!.gitnuke")
-        .unwrap()
+        .add_line(None, "!.git")?
+        .add_line(None, "!.hg")?
+        .add_line(None, "!.gitignore")?
+        .add_line(None, "!.gitnuke")?
         // TODO: cmdline whitelist?
         .build()
         .unwrap();
@@ -221,11 +217,11 @@ fn main() -> anyhow::Result<()> {
                     // Test if child_path is ignored, whitelisted, or neither
                     // Return first match that is either ignored or whitelisted
                     let is_dir = child_meta.is_dir();
-                    let ignore_match = //gitnuke_tip.vals()
-                    //.chain(gitignore_tip.vals())
-                    gitignore_tip.vals()
-                    .map(|i| i.matched(&child_path, is_dir))
-                    .find(|m| !m.is_none());
+                    let ignore_match = gitnuke_tip
+                        .vals()
+                        .chain(gitignore_tip.vals())
+                        .map(|i| i.matched(&child_path, is_dir))
+                        .find(|m| !m.is_none());
 
                     // Handle ignored/whitelisted/neither
                     match ignore_match {
