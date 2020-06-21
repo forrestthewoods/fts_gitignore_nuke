@@ -210,12 +210,6 @@ fn main() -> anyhow::Result<()> {
                 let child_meta = std::fs::metadata(&child_path)
                     .with_context(|| path_context!("fs::metadata", &child_path))?;
 
-                let HACK_debug = child_path.to_str().unwrap();
-                if HACK_debug.contains("target") {
-                    let mut x = 5;
-                    x += 3;
-                }
-
                 // Test if child_path is ignored, whitelisted, or neither
                 // Return first match that is either ignored or whitelisted
                 let is_dir = child_meta.is_dir();
