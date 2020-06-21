@@ -10,10 +10,6 @@
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/fts_gitignore_nuke.exe",
             "args": [
-                "-d",
-                "target",
-                "-r",
-                "c:\\source_control"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",

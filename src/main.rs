@@ -5,7 +5,7 @@ use ignore::{ gitignore::{Gitignore, GitignoreBuilder}};
 use itertools::Itertools;
 use num_format::{Locale, ToFormattedString};
 use std::{env, fs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use structopt::StructOpt;
 
@@ -73,6 +73,21 @@ fn main() -> anyhow::Result<()> {
         })
     }
 
+    // Helper to add .gitignore and .gitnuke files
+    let build_ignore = |dir: &Path, filename: &str| -> Option<Gitignore> {
+        let ignore_path = dir.join(filename);
+        if ignore_path.exists() {
+            let mut ignore_builder = GitignoreBuilder::new(dir);
+            ignore_builder.add(ignore_path.clone());
+            if let Ok(ignore) = ignore_builder.build() {
+                if opt.print_glob_matches {
+                    println!("Loaded: [{}]", ignore_path.display());
+                }
+                return Some(ignore);
+            }
+        }
+        None
+    };
 
 
     // Determine starting dir
@@ -91,60 +106,45 @@ fn main() -> anyhow::Result<()> {
 
 
 
-    // Start .gitignore stack with an empty root
-    let ignore_stack = ArcCactus::new();
-    let mut ignore_tip = ignore_stack.clone();
+    // Start .gitignore and .gitnuke stacks with empty root
+    let mut gitignore_tip = ArcCactus::new();
+    let mut gitnuke_tip = ArcCactus::new();
 
-    // Add whitelist to stack
+    // Add whitelist to gitnuke stack
     let ignore_whitelist = GitignoreBuilder::new(starting_dir.clone())
-        // These are useless because their precedence is lower than patterns loaded later
-        // If a .gitignore specifies to exclude `.git`, then `.git` will be deleted.
-        // Instead, these should be either manually checked or added
-        // to the stack later to have a higher precedence
-        // .add_line(None, "!.git").unwrap()
-        // .add_line(None, "!.hg").unwrap()
-        // .add_line(None, "!.gitignore").unwrap()
-        // .add_line(None, "!.gitnuke").unwrap()
+        .add_line(None, "!.git").unwrap()
+        .add_line(None, "!.hg").unwrap()
+        .add_line(None, "!.gitignore").unwrap()
+        .add_line(None, "!.gitnuke").unwrap()
         // TODO: cmdline whitelist?
         .build().unwrap();
-    ignore_tip = ignore_tip.child(ignore_whitelist);
+    gitnuke_tip = gitnuke_tip.child(ignore_whitelist);
 
-    // Add global ignore (if exists)
-    let mut global_ignore = ignore_tip.clone();
+    // Add global ignore (if requested)
+    let mut global_ignore = gitignore_tip.clone();
     if opt.include_global_ignore {
-        println!("Adding global ignore");
         let (global_gitignore, err) = GitignoreBuilder::new(starting_dir.clone()).build_global();
         if err.is_none() && global_gitignore.num_ignores() > 0 {
-            ignore_tip = ignore_stack.child(global_gitignore);
-            global_ignore = ignore_tip.clone();
+            gitignore_tip = gitignore_tip.child(global_gitignore);
+            global_ignore = gitignore_tip.clone();
         }
     }
 
     // Search for ignores in parent directories
     // Stop if .git or .hg is present
     if root.is_some() {
-        let mut parent_ignores : Vec<_>  = Default::default();
+        let mut parent_gitignore : Vec<_>  = Default::default();
+        let mut parent_gitnuke : Vec<_>  = Default::default();
         let mut dir : &std::path::Path = &starting_dir;
         while let Some(parent_path) = dir.parent() {
             // Push `.gitignore` patterns
-            let ignore_path = parent_path.join(".gitignore");
-            if ignore_path.exists() {
-                let mut ignore_builder = GitignoreBuilder::new(parent_path);
-                ignore_builder.add(ignore_path.clone());
-                if let Ok(ignore) = ignore_builder.build() {
-                    println!("Adding: [{}]", ignore_path.display());
-                    parent_ignores.push(ignore);
-                }
+            if let Some(ignore) = build_ignore(&parent_path, ".gitignore") {
+                parent_gitignore.push(ignore);
             }
+
             // Push `.gitnuke` patterns (higher priority than `.gitignore`)
-            let preserve_path = parent_path.join(".gitnuke");
-            if preserve_path.exists() {
-                let mut ignore_builder = GitignoreBuilder::new(parent_path);
-                ignore_builder.add(preserve_path.clone());
-                if let Ok(ignore) = ignore_builder.build() {
-                    println!("Adding: [{}]", preserve_path.display());
-                    parent_ignores.push(ignore);
-                }
+            if let Some(ignore) = build_ignore(&parent_path, ".gitnuke") {
+                parent_gitnuke.push(ignore);
             }
 
             // Stop at source control roots
@@ -162,9 +162,14 @@ fn main() -> anyhow::Result<()> {
             dir = parent_path;
         }
 
-        // Push parent ignores onto ignore_stack
-        for ignore in parent_ignores.into_iter().rev() {
-            ignore_tip = ignore_stack.child(ignore);
+        // Push parent gitignores onto gitignore_stack
+        for ignore in parent_gitignore.into_iter().rev() {
+            gitignore_tip = gitignore_tip.child(ignore);
+        }
+
+        // Push parent gitnukes onto gitnuke_stack
+        for ignore in parent_gitnuke.into_iter().rev() {
+            gitnuke_tip = gitnuke_tip.child(ignore);
         }
     }
 
@@ -172,7 +177,7 @@ fn main() -> anyhow::Result<()> {
     // Recursive job takes a path, checks if it's ignored, and recurses into subdirs if needed
     // Return value is result for the path only. Sub-directories will run separately
     // and return their own result.
-    let recursive_job = |(mut ignore_tip, path): (ArcCactus<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
+    let recursive_job = |(mut gitignore_tip, mut gitnuke_tip, path): (ArcCactus<Gitignore>, ArcCactus<Gitignore>, PathBuf), worker: &Worker<_>| -> Option<Vec<PathBuf>> {
 
         let mut job_ignores : Vec<_> = Default::default();
 
@@ -182,26 +187,17 @@ fn main() -> anyhow::Result<()> {
         // Check for source control root
         if path.join(".git").exists() || path.join(".hg").exists() {
             // Reset ignore tip
-            ignore_tip = global_ignore.clone();
+            gitignore_tip = global_ignore.clone();
         }
 
         // Add `.gitignore` patterns
-        let ignore_path = path.join(".gitignore");
-        if ignore_path.exists() {
-            let mut ignore_builder = GitignoreBuilder::new(&path);
-            ignore_builder.add(ignore_path);
-            if let Ok(ignore) = ignore_builder.build() {
-                ignore_tip = ignore_tip.child(ignore);
-            }
+        if let Some(ignore) = build_ignore(&path, ".gitignore") {
+            gitignore_tip = gitignore_tip.child(ignore);
         }
+
         // Add `.gitnuke` patterns
-        let preserve_path = path.join(".gitnuke");
-        if preserve_path.exists() {
-            let mut ignore_builder = GitignoreBuilder::new(&path);
-            ignore_builder.add(preserve_path);
-            if let Ok(ignore) = ignore_builder.build() {
-                ignore_tip = ignore_tip.child(ignore);
-            }
+        if let Some(ignore) = build_ignore(&path, ".gitnuke") {
+            gitnuke_tip = gitnuke_tip.child(ignore);
         }
 
         // Process each child in directory
@@ -214,10 +210,18 @@ fn main() -> anyhow::Result<()> {
                 let child_meta = std::fs::metadata(&child_path)
                     .with_context(|| path_context!("fs::metadata", &child_path))?;
 
+                let HACK_debug = child_path.to_str().unwrap();
+                if HACK_debug.contains("target") {
+                    let mut x = 5;
+                    x += 3;
+                }
+
                 // Test if child_path is ignored, whitelisted, or neither
                 // Return first match that is either ignored or whitelisted
                 let is_dir = child_meta.is_dir();
-                let ignore_match = ignore_tip.vals()
+                let ignore_match = //gitnuke_tip.vals()
+                    //.chain(gitignore_tip.vals())
+                    gitignore_tip.vals()
                     .map(|i| i.matched(&child_path, is_dir))
                     .find(|m| !m.is_none());
 
@@ -241,7 +245,7 @@ fn main() -> anyhow::Result<()> {
                     None => {
                         // No match, recurse into directories
                         if is_dir {
-                            worker.push((ignore_tip.clone(), child_path));
+                            worker.push((gitignore_tip.clone(), gitnuke_tip.clone(), child_path));
                         }
                     }
                 }
@@ -260,7 +264,7 @@ fn main() -> anyhow::Result<()> {
 
     // Initialize data
     println!("🔍 scanning for targets from [{:?}]", starting_dir);
-    let initial_data = vec!((ignore_tip, starting_dir));
+    let initial_data = vec!((gitignore_tip, gitnuke_tip, starting_dir));
 
     // Run recursive jobs
     let ignored_paths : Vec<(usize, PathBuf)> = job_system::run_recursive_job(initial_data, recursive_job, num_threads)
@@ -325,7 +329,6 @@ fn main() -> anyhow::Result<()> {
         .zip(ignore_path_sizes)
         .map(|((_,path), size)| (path, size))
         .filter(|(_, size)| *size >= opt.min_file_size)
-        .filter(|(path, _)| exclude_global_whitelist(&path))
         .sorted_by_key(|kvp| kvp.1)
         .collect();
 
@@ -434,20 +437,5 @@ fn pretty_bytes(orig_amount: u64) -> String {
         7 => format!("{} Zetta", amount),
         8 => format!("{} Yotta", amount),
         _ => format!("{}", orig_amount)
-    }
-}
-
-// Return true iff the file is not part of the global whitelist
-fn exclude_global_whitelist(path: &PathBuf) -> bool {
-    if let Some(fname) = path.file_name() {
-        match fname.to_str() {
-            Some(".git")
-            | Some(".hg")
-            | Some(".gitignore")
-            | Some(".gitnuke") => false,
-            _ => true,
-        }
-    } else {
-        true
     }
 }
