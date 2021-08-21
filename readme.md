@@ -42,6 +42,7 @@ FLAGS:
         --include-global-ignore    Include global .gitignore for matches
         --print-errors             Prints errors if encountered
         --print-glob-matches       Prints which glob and which .gitignore matched each path
+        --dry-run                  Preview which files will be nuked
     -V, --version                  Prints version information
 
 OPTIONS:
