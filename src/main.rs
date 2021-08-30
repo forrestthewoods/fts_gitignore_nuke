@@ -47,6 +47,9 @@ struct Opts {
 
     #[structopt(long, help = "Prints errors if encountered")]
     print_errors: bool,
+
+    #[structopt(long, help = "Preview which files will be nuked")]
+    dry_run: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -348,8 +351,8 @@ fn main() -> anyhow::Result<()> {
     println!("Total Bytes: {}", total_bytes.to_formatted_string(&Locale::en));
     println!("Time: {:?}", start.elapsed());
 
-    // Skip NUKE op in benchmark mode
-    if opt.benchmark {
+    // Skip NUKE op in benchmark and dry-run modes
+    if opt.benchmark || opt.dry_run {
         return Ok(());
     }
 
